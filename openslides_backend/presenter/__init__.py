@@ -3,6 +3,7 @@ from . import (  # noqa
     check_database_all,
     export_meeting,
     get_active_users_amount,
+    get_decision_archive,
     get_forwarding_committees,
     get_forwarding_meetings,
     get_mediafile_context,

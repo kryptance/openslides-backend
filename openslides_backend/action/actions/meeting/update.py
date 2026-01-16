@@ -173,6 +173,7 @@ meeting_settings_keys = [
     "topic_poll_default_group_ids",
     "poll_default_backend",
     "poll_default_live_voting_enabled",
+    "enable_decision_archive",
 ]
 
 

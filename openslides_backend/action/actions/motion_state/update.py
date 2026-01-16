@@ -31,6 +31,7 @@ class MotionStateUpdateAction(UpdateAction):
             "allow_amendment_forwarding",
             "set_number",
             "set_workflow_timestamp",
+            "publish_to_archive",
             "show_state_extension_field",
             "show_recommendation_extension_field",
             "merge_amendment_into_final",

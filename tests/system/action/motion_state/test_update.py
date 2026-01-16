@@ -134,3 +134,19 @@ class MotionStateActionTest(BaseActionTestCase):
         self.base_locked_out_superadmin_permission_test(
             {}, "motion_state.update", {"id": 1, "name": "name_Xcdfgee"}
         )
+
+    def test_update_publish_to_archive(self) -> None:
+        response = self.request(
+            "motion_state.update",
+            {
+                "id": 1,
+                "publish_to_archive": True,
+            },
+        )
+        self.assert_status_code(response, 200)
+        self.assert_model_exists(
+            "motion_state/1",
+            {
+                "publish_to_archive": True,
+            },
+        )

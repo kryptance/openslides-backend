@@ -506,6 +506,12 @@ class Meeting(Model, MeetingModelMixin):
         to={"organization": "template_meeting_ids"}
     )
     enable_anonymous = fields.BooleanField(default=False)
+    enable_decision_archive = fields.BooleanField(
+        default=False,
+        constraints={
+            "description": "When enabled, archived decisions from this meeting are visible to all logged-in users."
+        },
+    )
     custom_translations = fields.JSONField()
     conference_show = fields.BooleanField(default=False)
     conference_auto_connect = fields.BooleanField(default=False)
@@ -2276,6 +2282,12 @@ class MotionState(Model):
     allow_motion_forwarding = fields.BooleanField(default=False)
     allow_amendment_forwarding = fields.BooleanField()
     set_workflow_timestamp = fields.BooleanField(default=False)
+    publish_to_archive = fields.BooleanField(
+        default=False,
+        constraints={
+            "description": "Motions in this state are published to the organization-wide decision archive."
+        },
+    )
     state_button_label = fields.CharField()
     submitter_withdraw_state_id = fields.RelationField(
         to={"motion_state": "submitter_withdraw_back_ids"},
