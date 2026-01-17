@@ -144,7 +144,9 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
             meeting_id,
             ["committee_id"],
             lock_result=False,
-        ) or {}
+        )
+        if not meeting:
+            raise ActionException(f"Model 'meeting/{meeting_id}' does not exist.")
         if meeting.get("committee_id") != committee_id:
             raise ActionException(
                 f"Meeting {meeting_id} does not belong to committee {committee_id}"
