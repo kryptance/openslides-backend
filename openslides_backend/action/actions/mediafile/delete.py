@@ -25,9 +25,9 @@ class MediafileDelete(MediafileMixin, DeleteAction):
 
     def get_tree_ids(self, id_: int) -> list[int]:
         tree_ids = [id_]
-        node = self.datastore.get(
-            fqid_from_collection_and_id("mediafile", id_), ["child_ids"]
-        )
+        node = self.sql.get(
+            "mediafile", id_, ["child_ids"]
+        ) or {}
         if node.get("child_ids"):
             for child_id in node["child_ids"]:
                 if not self.is_to_be_deleted(

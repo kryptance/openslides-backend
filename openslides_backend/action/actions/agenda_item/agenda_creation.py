@@ -5,6 +5,8 @@ from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import id_list_schema, optional_id_schema
 from ...action import Action
 
+ONE_ORGANIZATION_ID = 1
+
 AGENDA_PREFIX = "agenda_"
 
 agenda_creation_properties = {
@@ -54,11 +56,11 @@ class CreateActionWithAgendaItemMixin(Action):
     def check_dependant_action_execution_agenda_item(
         self, instance: dict[str, Any], CreateActionClass: type[Action]
     ) -> bool:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", instance["meeting_id"],
             ["agenda_item_creation"],
             lock_result=False,
-        )
+        ) or {}
         agenda_item_creation = meeting.get("agenda_item_creation")
         agenda_create = instance.pop("agenda_create", None)
         result_value: bool

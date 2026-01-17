@@ -2,7 +2,6 @@ from typing import Any
 
 from openslides_backend.shared.filters import FilterOperator
 
-from ....services.database.commands import GetManyRequest
 from ...action import Action
 from ...mixins.import_mixins import ImportRow, ImportState
 from .functions import detect_circles
@@ -20,7 +19,7 @@ class CommitteeImportMixin(Action):
             if (
                 template_id := entry.get("meeting_template", {}).get("id")
             ) and entry.get("meeting_template", {}).get("info") == ImportState.DONE:
-                groups = self.datastore.filter(
+                groups = self.sql.filter(
                     "group",
                     FilterOperator("admin_group_for_meeting_id", "=", template_id),
                     ["meeting_user_ids"],
@@ -72,18 +71,19 @@ class CommitteeImportMixin(Action):
                 and row["data"].get("parent", {}).get("info") == ImportState.DONE
             }
             parent_ids.difference_update(child_ids)
-            db_instances = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "committee", list(child_ids), ["name", "all_child_ids"]
-                    ),
-                    GetManyRequest(
-                        "committee",
-                        list(parent_ids),
-                        ["name", "parent_id", "all_parent_ids"],
-                    ),
-                ]
-            )["committee"]
+
+            # Get child committees
+            child_committees = self.sql.get_many(
+                "committee", list(child_ids), ["name", "all_child_ids"]
+            ) if child_ids else {}
+
+            # Get parent committees
+            parent_committees = self.sql.get_many(
+                "committee", list(parent_ids), ["name", "parent_id", "all_parent_ids"]
+            ) if parent_ids else {}
+
+            db_instances = {**child_committees, **parent_committees}
+
             all_other_ids = {
                 id_
                 for inst in db_instances.values()
@@ -93,15 +93,11 @@ class CommitteeImportMixin(Action):
                 ]
             }
             all_other_ids.difference_update(child_ids, parent_ids)
-            db_instances.update(
-                self.datastore.get_many(
-                    [
-                        GetManyRequest(
-                            "committee", list(all_other_ids), ["name", "parent_id"]
-                        )
-                    ]
-                )["committee"]
-            )
+
+            other_committees = self.sql.get_many(
+                "committee", list(all_other_ids), ["name", "parent_id"]
+            ) if all_other_ids else {}
+            db_instances.update(other_committees)
             id_to_name: dict[int, str] = {
                 id_: inst["name"] for id_, inst in db_instances.items()
             }

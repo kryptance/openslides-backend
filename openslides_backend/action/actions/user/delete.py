@@ -1,7 +1,5 @@
 from typing import Any
 
-from openslides_backend.services.database.commands import GetManyRequest
-
 from ....action.action import original_instances
 from ....action.util.typing import ActionData
 from ....models.models import User
@@ -47,9 +45,9 @@ class UserDelete(UserScopeMixin, DeleteAction, AdminIntegrityCheckMixin):
         if not len(delete_data):
             return
         meeting_ids_to_user_ids: dict[int, list[int]] = {}
-        users = self.datastore.get_many(
-            [GetManyRequest("user", delete_data, ["meeting_ids", "meeting_user_ids"])]
-        )["user"]
+        users = self.sql.get_many(
+            "user", delete_data, ["meeting_ids", "meeting_user_ids"]
+        ) if delete_data else {}
         for id_, user in users.items():
             for meeting_id in user.get("meeting_ids", []):
                 if meeting_id not in meeting_ids_to_user_ids:

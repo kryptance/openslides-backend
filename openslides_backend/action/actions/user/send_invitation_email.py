@@ -15,8 +15,6 @@ from zoneinfo import ZoneInfo
 
 from fastjsonschema import JsonSchemaException
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
-
 from ....action.mixins.meeting_user_helper import get_meeting_user
 from ....models.models import User
 from ....permissions.management_levels import OrganizationManagementLevel
@@ -25,10 +23,8 @@ from ....permissions.permission_helper import (
     has_perm,
 )
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import DatabaseException, MissingPermission
 from ....shared.interfaces.write_request import WriteRequest
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import optional_id_schema
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...generics.update import UpdateAction
@@ -158,8 +154,9 @@ class UserSendInvitationMail(UpdateAction):
         result = self.get_initial_result_false(instance)
         instance["result"] = result
 
-        user = self.datastore.get(
-            fqid_from_collection_and_id("user", user_id),
+        user = self.sql.get(
+            "user",
+            user_id,
             [
                 "meeting_ids",
                 "email",
@@ -169,7 +166,7 @@ class UserSendInvitationMail(UpdateAction):
                 "title",
                 "default_password",
             ],
-        )
+        ) or {}
         if not (to_email := user.get("email")):
             result["message"] = f"'{user['username']}' has no email address."
             result["type"] = EmailErrorType.USER_ERROR
@@ -234,14 +231,13 @@ class UserSendInvitationMail(UpdateAction):
                 user_id,
                 ["structure_level_ids", "group_ids"],
             )
-            gmr = [
-                GetManyRequest(coll, coll_ids, ["name"])
-                for coll in ["group", "structure_level"]
-                if m_user and (coll_ids := m_user.get(coll + "_ids"))
-            ]
             gm_result: dict[str, dict[int, dict[str, Any]]] = {}
-            if len(gmr):
-                gm_result = self.datastore.get_many(gmr, lock_result=False)
+            if m_user:
+                for coll in ["group", "structure_level"]:
+                    if coll_ids := m_user.get(coll + "_ids"):
+                        gm_result[coll] = self.sql.get_many(
+                            coll, coll_ids, ["name"], lock_result=False
+                        )
             subject_format.update(
                 {
                     coll
@@ -290,17 +286,19 @@ class UserSendInvitationMail(UpdateAction):
             collection = "meeting"
             id_ = meeting_id
 
-        res = self.datastore.get(
-            fqid_from_collection_and_id(collection, id_),
+        res = self.sql.get(
+            collection,
+            id_,
             fields,
             lock_result=False,
-        )
+        ) or {}
         if meeting_id:
-            organization = self.datastore.get(
-                ONE_ORGANIZATION_FQID,
+            organization = self.sql.get(
+                "organization",
+                ONE_ORGANIZATION_ID,
                 ["url"],
                 lock_result=False,
-            )
+            ) or {}
             res["url"] = organization.get("url", "")
         return res
 

@@ -3,7 +3,6 @@ from typing import Any
 from ....models.models import AgendaItem
 from ....permissions.permissions import Permissions
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.create_action_with_inferred_meeting import (
     CreateActionWithInferredMeeting,
 )
@@ -43,12 +42,10 @@ class AgendaItemCreate(CreateActionWithInferredMeeting):
         if instance.get("parent_id") is None:
             parent = {"is_hidden": False, "is_internal": False, "level": -1}
         else:
-            parent = self.datastore.get(
-                fqid_from_collection_and_id(
-                    self.model.collection, instance["parent_id"]
-                ),
+            parent = self.sql.get(
+                self.model.collection, instance["parent_id"],
                 ["is_hidden", "is_internal", "level"],
-            )
+            ) or {}
         instance["level"] = parent.get("level", 0) + 1
         instance["is_hidden"] = instance.get(
             "type"
@@ -58,7 +55,7 @@ class AgendaItemCreate(CreateActionWithInferredMeeting):
         ) == AgendaItem.INTERNAL_ITEM or parent.get("is_internal", False)
 
         if "weight" not in instance:
-            max_weight = self.datastore.max(
+            max_weight = self.sql.max(
                 self.model.collection,
                 And(
                     FilterOperator("parent_id", "=", instance.get("parent_id")),

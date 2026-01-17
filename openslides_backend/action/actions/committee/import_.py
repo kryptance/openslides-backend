@@ -7,8 +7,7 @@ from openslides_backend.action.actions.organization_tag.create import (
     OrganizationTagCreate,
 )
 from openslides_backend.action.util.typing import ActionData, ActionResults
-from openslides_backend.services.database.commands import GetManyRequest
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID, ONE_ORGANIZATION_ID
+from openslides_backend.shared.util import ONE_ORGANIZATION_ID
 
 from ....permissions.management_levels import OrganizationManagementLevel
 from ...mixins.import_mixins import BaseImportAction, ImportRow, ImportState, Lookup
@@ -239,12 +238,12 @@ class CommitteeImport(BaseImportAction, CommitteeImportMixin):
                     entry[self.field_map.get(field, field)] = val
 
     def get_organization_language(self) -> str:
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization", ONE_ORGANIZATION_ID,
             ["default_language"],
             lock_result=False,
             use_changed_models=False,
-        )
+        ) or {}
         return organization["default_language"]
 
     def setup_lookups(self) -> None:
@@ -257,60 +256,54 @@ class CommitteeImport(BaseImportAction, CommitteeImportMixin):
                 if (entry := row["data"])
             ],
         )
-        result = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "committee",
-                    [
-                        id
-                        for row in self.rows
-                        for committee in [
-                            row["data"].get("parent", {}),
-                            *row["data"].get("forward_to_committees", []),
-                        ]
-                        if (id := committee.get("id"))
-                    ],
-                    ["name"],
-                ),
-                GetManyRequest(
-                    "user",
-                    [
-                        id
-                        for row in self.rows
-                        for user in row["data"].get("managers", [])
-                        + row["data"].get("meeting_admins", [])
-                        if (id := user.get("id"))
-                    ],
-                    ["username"],
-                ),
-                GetManyRequest(
-                    "organization_tag",
-                    [
-                        id
-                        for row in self.rows
-                        for tag in row["data"].get("organization_tags", [])
-                        if (id := tag.get("id"))
-                    ],
-                    ["name"],
-                ),
-                GetManyRequest(
-                    "meeting",
-                    [
-                        id
-                        for row in self.rows
-                        if (id := row["data"].get("meeting_template", {}).get("id"))
-                    ],
-                    ["name"],
-                ),
-            ],
-            lock_result=False,
-            use_changed_models=False,
-        )
+        committee_ids = [
+            id
+            for row in self.rows
+            for committee in [
+                row["data"].get("parent", {}),
+                *row["data"].get("forward_to_committees", []),
+            ]
+            if (id := committee.get("id"))
+        ]
+        user_ids = [
+            id
+            for row in self.rows
+            for user in row["data"].get("managers", [])
+            + row["data"].get("meeting_admins", [])
+            if (id := user.get("id"))
+        ]
+        organization_tag_ids = [
+            id
+            for row in self.rows
+            for tag in row["data"].get("organization_tags", [])
+            if (id := tag.get("id"))
+        ]
+        meeting_ids = [
+            id
+            for row in self.rows
+            if (id := row["data"].get("meeting_template", {}).get("id"))
+        ]
+        committees = self.sql.get_many(
+            "committee", committee_ids, ["name"],
+            lock_result=False, use_changed_models=False
+        ) if committee_ids else {}
+        users = self.sql.get_many(
+            "user", user_ids, ["username"],
+            lock_result=False, use_changed_models=False
+        ) if user_ids else {}
+        organization_tags = self.sql.get_many(
+            "organization_tag", organization_tag_ids, ["name"],
+            lock_result=False, use_changed_models=False
+        ) if organization_tag_ids else {}
+        meetings = self.sql.get_many(
+            "meeting", meeting_ids, ["name"],
+            lock_result=False, use_changed_models=False
+        ) if meeting_ids else {}
         self.committee_map = {
-            k: v["name"] for k, v in result.get("committee", {}).items()
+            k: v["name"] for k, v in committees.items()
         }
-        self.user_map = {k: v["username"] for k, v in result.get("user", {}).items()}
+        self.user_map = {k: v["username"] for k, v in users.items()}
         self.organization_tag_map = {
-            k: v["name"] for k, v in result.get("organization_tag", {}).items()
+            k: v["name"] for k, v in organization_tags.items()
         }
-        self.meeting_map = {k: v["name"] for k, v in result.get("meeting", {}).items()}
+        self.meeting_map = {k: v["name"] for k, v in meetings.items()}

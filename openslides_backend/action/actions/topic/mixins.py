@@ -6,7 +6,7 @@ class DuplicateCheckMixin(Action):
     def init_duplicate_set(self, meeting_id: int) -> None:
         self.all_titles_in_meeting = {
             values.get("title")
-            for values in self.datastore.filter(
+            for values in self.sql.filter(
                 "topic", FilterOperator("meeting_id", "=", meeting_id), ["title"]
             ).values()
         }

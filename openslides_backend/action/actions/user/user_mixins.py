@@ -2,10 +2,9 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from openslides_backend.services.database.commands import GetManyRequest
 from openslides_backend.services.database.interface import PartialModel
 from openslides_backend.shared.typing import HistoryInformation
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
+from openslides_backend.shared.util import ONE_ORGANIZATION_ID
 
 from ....presenter.search_users import SearchUsers
 from ....services.database.interface import Database
@@ -37,7 +36,7 @@ class UsernameMixin(Action):
                     count += 1
                     username = template_username + str(count)
                     continue
-                result = self.datastore.filter(
+                result = self.sql.filter(
                     "user",
                     FilterOperator("username", "=", username),
                     ["id"],
@@ -64,14 +63,15 @@ class UsernameMixin(Action):
 
 class LimitOfUserMixin(Action):
     def check_limit_of_user(self, number: int) -> None:
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization",
+            ONE_ORGANIZATION_ID,
             ["limit_of_users"],
             lock_result=False,
-        )
+        ) or {}
         if limit_of_users := organization.get("limit_of_users"):
             filter_ = FilterOperator("is_active", "=", True)
-            count_of_active_users = self.datastore.count("user", filter_)
+            count_of_active_users = self.sql.count("user", filter_)
             if number + count_of_active_users > limit_of_users:
                 raise ActionException(
                     "The number of active users cannot exceed the limit of users."
@@ -119,7 +119,7 @@ class UserMixin(CheckForArchivedMeetingMixin):
             if what in instance:
                 if not instance[what]:
                     raise ActionException(f"This {what} is forbidden.")
-                result = self.datastore.filter(
+                result = self.sql.filter(
                     "user",
                     FilterOperator(what, "=", instance[what]),
                     ["id"],
@@ -147,8 +147,8 @@ class UserMixin(CheckForArchivedMeetingMixin):
     def check_meeting_and_users(
         self, instance: dict[str, Any], user_fqid: FullQualifiedId
     ) -> None:
-        if (meeting_id := instance.get("meeting_id")) is not None:
-            self.datastore.apply_changed_model(user_fqid, {"meeting_id": meeting_id})
+        # meeting_id is handled by meeting_user_set_data, no cache needed
+        pass
 
     def meeting_user_set_data(self, instance: dict[str, Any]) -> None:
         meeting_user_data = {}
@@ -173,11 +173,11 @@ class UpdateHistoryMixin(Action):
             instance_information = []
 
             # Fetch the current instance from the db to diff with the given instance
-            db_instance = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            db_instance = self.sql.get(
+                self.model.collection,
+                instance["id"],
                 list(instance.keys()),
-                use_changed_models=False,
-                raise_exception=False,
+                lock_result=False,
             )
             if not db_instance:
                 continue
@@ -298,18 +298,14 @@ class AdminIntegrityCheckMixin(Action):
         admin_group_ids: list[int],
         added_groups: set[int] = set(),
     ) -> None:
-        meeting_users = self.datastore.filter(
+        meeting_users = self.sql.filter(
             "meeting_user", meeting_user_filter, ["group_ids", "user_id"]
         )
-        groups = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "group",
-                    admin_group_ids,
-                    ["meeting_user_ids", "admin_group_for_meeting_id"],
-                )
-            ]
-        )["group"]
+        groups = self.sql.get_many(
+            "group",
+            admin_group_ids,
+            ["meeting_user_ids", "admin_group_for_meeting_id"],
+        )
         broken_meetings: list[str] = []
         for group_id, group_data in groups.items():
             if group_id in added_groups:
@@ -328,15 +324,11 @@ class AdminIntegrityCheckMixin(Action):
         self, meeting_ids: list[int]
     ) -> dict[int, PartialModel]:
         if len(meeting_ids):
-            return self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting",
-                        meeting_ids,
-                        ["admin_group_id", "template_for_organization_id"],
-                    )
-                ]
-            )["meeting"]
+            return self.sql.get_many(
+                "meeting",
+                meeting_ids,
+                ["admin_group_id", "template_for_organization_id"],
+            )
         return {}
 
     def filter_templates_from_meetings_data_dict(

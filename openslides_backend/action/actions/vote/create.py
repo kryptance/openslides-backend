@@ -1,7 +1,6 @@
 from typing import cast
 
 from openslides_backend.action.util.typing import ActionData
-from openslides_backend.services.database.commands import GetManyRequest
 
 from ....models.models import Vote
 from ...mixins.create_action_with_inferred_meeting import (
@@ -32,44 +31,22 @@ class VoteCreate(CreateActionWithInferredMeeting):
     relation_field_for_meeting = "option_id"
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "option",
-                    list({instance["option_id"] for instance in action_data}),
-                    ["meeting_id", "vote_ids"],
-                ),
-            ],
-            use_changed_models=False,
-        )
-        meeting_users = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "meeting_user",
-                    list(
-                        {
-                            cast(int, instance.get(fname))
-                            for instance in action_data
-                            for fname in (
-                                "meeting_user_id",
-                                "delegated_meeting_user_id",
-                            )
-                            if instance.get(fname)
-                        }
-                    ),
-                    ["id", "user_id", "vote_ids", "delegated_vote_ids"],
-                ),
-            ],
-            use_changed_models=False,
-        )["meeting_user"]
+        option_ids = list({instance["option_id"] for instance in action_data})
+        self.sql.get_many("option", option_ids, ["meeting_id", "vote_ids"])
 
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "user",
-                    list({mu["user_id"] for mu in meeting_users.values()}),
-                    ["id", "poll_voted_ids"],
-                ),
-            ],
-            use_changed_models=False,
+        meeting_user_ids = list(
+            {
+                cast(int, instance.get(fname))
+                for instance in action_data
+                for fname in ("meeting_user_id", "delegated_meeting_user_id")
+                if instance.get(fname)
+            }
         )
+        meeting_users = self.sql.get_many(
+            "meeting_user",
+            meeting_user_ids,
+            ["id", "user_id", "vote_ids", "delegated_vote_ids"],
+        )
+
+        user_ids = list({mu["user_id"] for mu in meeting_users.values()})
+        self.sql.get_many("user", user_ids, ["id", "poll_voted_ids"])

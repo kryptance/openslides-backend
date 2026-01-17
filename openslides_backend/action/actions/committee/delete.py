@@ -11,7 +11,7 @@ from ....shared.exceptions import (
     MissingPermission,
     ProtectedModelsException,
 )
-from ....shared.patterns import fqid_from_collection_and_id, id_from_fqid
+from ....shared.patterns import id_from_fqid
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
@@ -43,9 +43,9 @@ class CommitteeDeleteAction(DeleteAction):
             )
 
     def base_update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        to_delete = self.datastore.get(
-            fqid_from_collection_and_id("committee", instance["id"]), ["child_ids"]
-        )
+        to_delete = self.sql.get(
+            "committee", instance["id"], ["child_ids"]
+        ) or {}
         if to_delete.get("child_ids"):
             raise ActionException(
                 f"Can't delete committee {instance['id']} since it has subcommittees"

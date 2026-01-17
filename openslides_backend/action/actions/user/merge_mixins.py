@@ -12,7 +12,6 @@ from ....models.models import (
     PersonalNote,
     Speaker,
 )
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator, Or
 from ....shared.patterns import Collection, fqid_from_collection_and_id
@@ -53,7 +52,7 @@ class SpeakerMergeMixin(BaseMergeMixin):
 
     def check_speakers(self, meeting_user_ids: list[int]) -> None:
         if len(meeting_user_ids):
-            running_speakers = self.datastore.filter(
+            running_speakers = self.sql.filter(
                 "speaker",
                 And(
                     FilterOperator("end_time", "=", None),
@@ -258,10 +257,11 @@ class MeetingUserMergeMixin(
             case "motion_working_group_speaker":
                 return model["motion_id"]
             case "speaker":
-                meeting = self.datastore.get(
-                    fqid_from_collection_and_id("meeting", model["meeting_id"]),
+                meeting = self.sql.get(
+                    "meeting",
+                    model["meeting_id"],
                     ["list_of_speakers_allow_multiple_speakers"],
-                )
+                ) or {}
                 if (
                     meeting.get("list_of_speakers_allow_multiple_speakers")
                     or model.get("end_time") is not None
@@ -277,20 +277,16 @@ class MeetingUserMergeMixin(
 
     def check_polls_helper(self, meeting_user_ids: list[int]) -> list[str]:
         messages: list[str] = []
-        meeting_users = self.datastore.get_many(
+        meeting_users = self.sql.get_many(
+            "meeting_user",
+            meeting_user_ids,
             [
-                GetManyRequest(
-                    "meeting_user",
-                    meeting_user_ids,
-                    [
-                        "vote_delegations_from_ids",
-                        "vote_delegated_to_id",
-                        "meeting_id",
-                        "group_ids",
-                    ],
-                )
-            ]
-        ).get("meeting_user", {})
+                "vote_delegations_from_ids",
+                "vote_delegated_to_id",
+                "meeting_id",
+                "group_ids",
+            ],
+        ) if meeting_user_ids else {}
 
         group_ids: set[int] = set()
         meeting_ids: set[int] = set()
@@ -303,7 +299,7 @@ class MeetingUserMergeMixin(
                 group_ids.update(g_ids)
                 meeting_ids.add(m_user["meeting_id"])
         if meeting_ids:
-            polls = self.datastore.filter(
+            polls = self.sql.filter(
                 "poll",
                 And(
                     FilterOperator("state", "=", "started"),

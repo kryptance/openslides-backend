@@ -12,7 +12,6 @@ from ....models.models import User
 from ....permissions.management_levels import OrganizationManagementLevel
 from ....shared.exceptions import ActionException, PermissionException
 from ....shared.filters import And, FilterOperator, Or
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import optional_id_schema
 from ...generics.update import UpdateAction
 from ...mixins.send_email_mixin import EmailCheckMixin
@@ -91,13 +90,13 @@ class UserUpdate(
     def check_permissions(self, instance: dict[str, Any]) -> None:
         super().check_permissions(instance)
         if instance.get("external"):
-            user = self.datastore.get(
-                fqid_from_collection_and_id("user", instance["id"]),
-                mapped_fields=[
+            user = self.sql.get(
+                "user", instance["id"],
+                [
                     "home_committee_id",
                 ],
                 lock_result=False,
-            )
+            ) or {}
             if user.get("home_committee_id"):
                 self.check_group_I(["home_committee_id"], user)
 
@@ -118,16 +117,16 @@ class UserUpdate(
         )
         instance = super().update_instance(instance)
         home_committee_id = instance.get("home_committee_id")
-        user = self.datastore.get(
-            fqid_from_collection_and_id("user", instance["id"]),
-            mapped_fields=[
+        user = self.sql.get(
+            "user", instance["id"],
+            [
                 "is_active",
                 "organization_management_level",
                 "saml_id",
                 "password",
                 "home_committee_id",
             ],
-        )
+        ) or {}
         if instance.get("external"):
             if home_committee_id:
                 raise ActionException(

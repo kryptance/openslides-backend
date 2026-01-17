@@ -34,7 +34,7 @@ class UserForgetPasswordConfirm(UpdateAction, ClearSessionsMixin):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         user_id = instance.pop("user_id")
-        user = self.datastore.get(f"user/{user_id}", ["saml_id"], lock_result=False)
+        user = self.sql.get("user", user_id, ["saml_id"], lock_result=False) or {}
         new_password = instance.pop("new_password")
         if user.get("saml_id"):
             raise ActionException(

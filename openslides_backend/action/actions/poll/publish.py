@@ -5,7 +5,6 @@ from openslides_backend.shared.typing import HistoryInformation
 
 from ....models.models import Poll
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -29,10 +28,10 @@ class PollPublishAction(
     extend_history_to = "content_object_id"
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        poll = self.sql.get(
+            self.model.collection, instance["id"],
             ["state"],
-        )
+        ) or {}
         if poll.get("state") not in [Poll.STATE_FINISHED, Poll.STATE_STARTED]:
             raise ActionException(
                 f"Cannot publish poll {instance['id']}, because it is not in state finished or started."

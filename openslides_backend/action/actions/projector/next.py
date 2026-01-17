@@ -2,9 +2,7 @@ from typing import Any
 
 from ....models.models import Projector
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...mixins.weight_mixin import WeightMixin
 from ...util.default_schema import DefaultSchema
@@ -25,26 +23,26 @@ class ProjectorNext(WeightMixin, UpdateAction):
 
     def get_updated_instances(self, action_data: ActionData) -> ActionData:
         for instance in action_data:
-            projector = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            projector = self.sql.get(
+                self.model.collection,
+                instance["id"],
                 [
                     "current_projection_ids",
                     "preview_projection_ids",
                     "history_projection_ids",
                     "meeting_id",
                 ],
-            )
+            ) or {}
             if not projector.get("preview_projection_ids"):
                 continue
             current_projections = []
             if projector.get("current_projection_ids"):
-                gmr = GetManyRequest(
+                result = self.sql.get_many(
                     "projection",
                     projector["current_projection_ids"],
                     ["id", "stable"],
                 )
-                result = self.datastore.get_many([gmr])
-                current_projections = list(result.get("projection", {}).values())
+                current_projections = list(result.values())
             new_current_projection_ids = [
                 projection["id"]
                 for projection in current_projections
@@ -93,13 +91,12 @@ class ProjectorNext(WeightMixin, UpdateAction):
         self.execute_other_action(ProjectionUpdate, action_data)
 
     def get_min_preview_projection(self, projector: dict[str, Any]) -> int:
-        gmr2 = GetManyRequest(
+        result = self.sql.get_many(
             "projection",
             projector["preview_projection_ids"],
             ["id", "weight"],
         )
-        result = self.datastore.get_many([gmr2])
-        preview_projections = list(result.get("projection", {}).values())
+        preview_projections = list(result.values())
         pivot = preview_projections[0]
         for projection in preview_projections:
             if pivot.get("weight", 10000) > projection.get("weight", 10000):

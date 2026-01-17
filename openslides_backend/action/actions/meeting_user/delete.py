@@ -1,5 +1,6 @@
 from typing import Any
 
+from openslides_backend.shared.filters import FilterOperator
 from openslides_backend.shared.patterns import fqid_from_collection_and_id
 from openslides_backend.shared.typing import HistoryInformation
 
@@ -33,15 +34,14 @@ class MeetingUserDelete(ConditionalSpeakerCascadeMixinHelper, DeleteAction):
         }
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        meeting_user = self.datastore.get(
-            fqid_from_collection_and_id("meeting_user", instance["id"]),
+        meeting_user = self.sql.get(
+            "meeting_user", instance["id"],
             ["speaker_ids", "user_id", "meeting_id"],
-        )
+        ) or {}
         speaker_ids = meeting_user.get("speaker_ids", [])
         self.conditionally_delete_speakers(speaker_ids)
-        if not self.datastore.is_deleted(
-            fqid_from_collection_and_id("user", meeting_user["user_id"])
-        ):
+        # Check if user still exists (not deleted in this transaction)
+        if self.sql.exists("user", FilterOperator("id", "=", meeting_user["user_id"])):
             self.remove_presence(meeting_user["user_id"], meeting_user["meeting_id"])
 
         return super().update_instance(instance)

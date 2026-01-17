@@ -21,7 +21,7 @@ class DeleteHistoryInformation(Action):
     permission = OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        all_positions = self.datastore.get_all("history_position", ["id"])
+        all_positions = self.sql.get_all("history_position", ["id"])
         self.execute_other_action(
             HistoryPositionDelete, [{"id": id_} for id_ in all_positions]
         )

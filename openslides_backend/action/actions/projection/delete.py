@@ -20,8 +20,8 @@ class ProjectionDelete(DeleteAction):
     permission = Permissions.Projector.CAN_MANAGE
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        projection = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        projection = self.sql.get(
+            self.model.collection, instance["id"],
             [
                 "current_projector_id",
                 "preview_projector_id",
@@ -30,7 +30,7 @@ class ProjectionDelete(DeleteAction):
                 "meeting_id",
             ],
             lock_result=False,
-        )
+        ) or {}
         if not (
             projection.get("current_projector_id")
             or projection.get("preview_projector_id")

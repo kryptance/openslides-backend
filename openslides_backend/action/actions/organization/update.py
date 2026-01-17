@@ -2,7 +2,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
+from openslides_backend.shared.util import ONE_ORGANIZATION_ID
 
 from ....action.mixins.archived_meeting_check_mixin import CheckForArchivedMeetingMixin
 from ....models.models import Organization
@@ -168,10 +168,10 @@ class OrganizationUpdate(
         if "saml_attr_mapping" in instance:
             instance["saml_attr_mapping"] = Jsonb(instance["saml_attr_mapping"])
         if limit_of_meetings := instance.get("limit_of_meetings"):
-            organization = self.datastore.get(
-                ONE_ORGANIZATION_FQID,
+            organization = self.sql.get(
+                "organization", ONE_ORGANIZATION_ID,
                 ["active_meeting_ids"],
-            )
+            ) or {}
 
             if (
                 count_active_meetings := len(organization.get("active_meeting_ids", []))
@@ -182,7 +182,7 @@ class OrganizationUpdate(
 
         if limit_of_users := instance.get("limit_of_users"):
             filter_ = FilterOperator("is_active", "=", True)
-            count_active_users = self.datastore.count("user", filter_)
+            count_active_users = self.sql.count("user", filter_)
             if count_active_users > limit_of_users:
                 raise ActionException(
                     f"Active users: {count_active_users}. You cannot set the limit lower."

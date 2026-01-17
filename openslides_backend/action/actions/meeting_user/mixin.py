@@ -1,15 +1,11 @@
 from typing import Any, cast
 
-from openslides_backend.services.database.commands import GetManyRequest
-from openslides_backend.shared.exceptions import ModelDoesNotExist
-
 from ....action.mixins.meeting_user_helper import get_meeting_user
 from ....action.util.typing import ActionData, ActionResults
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, Filter, FilterOperator, Or
 from ....shared.interfaces.write_request import WriteRequest
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import Action
 from .history_mixin import MeetingUserHistoryMixin
 
@@ -24,7 +20,7 @@ meeting_user_standard_fields = [
 
 class MeetingUserGroupMixin(Action):
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        if len(group_ids := instance.get("group_ids", [])) and self.datastore.exists(
+        if len(group_ids := instance.get("group_ids", [])) and self.sql.exists(
             "group",
             And(
                 FilterOperator("anonymous_group_for_meeting_id", "!=", None),
@@ -99,18 +95,13 @@ class CheckLockOutPermissionMixin(Action):
                 raise_exception,
             )
             if not user:
-                try:
-                    user = self.datastore.get(
-                        fqid_from_collection_and_id("user", cast(int, user_id)),
-                        ["organization_management_level", "committee_management_ids"],
-                    )
-                except ModelDoesNotExist as err:
-                    if err.fqid == fqid_from_collection_and_id(
-                        "user", cast(int, user_id)
-                    ):
-                        return result
-                    else:
-                        raise err
+                user = self.sql.get(
+                    "user",
+                    cast(int, user_id),
+                    ["organization_management_level", "committee_management_ids"],
+                )
+                if not user:
+                    return result
         if not final.get("locked_out"):
             return result
         if user:
@@ -139,7 +130,7 @@ class CheckLockOutPermissionMixin(Action):
         raise_exception: bool,
     ) -> None:
         if final["meeting_id"] not in self.meeting_id_to_can_manage_group_ids:
-            groups = self.datastore.filter(
+            groups = self.sql.filter(
                 "group",
                 FilterOperator("meeting_id", "=", final["meeting_id"]),
                 ["permissions", "admin_group_for_meeting_id"],
@@ -179,21 +170,19 @@ class CheckLockOutPermissionMixin(Action):
                 result,
                 raise_exception,
             )
-        data = self.datastore.get_many(
-            [
-                GetManyRequest("meeting", [final["meeting_id"]], ["committee_id"]),
-                GetManyRequest(
-                    "committee",
-                    final.get("committee_management_ids") or [],
-                    ["all_child_ids"],
-                ),
-            ]
+        meetings = self.sql.get_many(
+            "meeting", [final["meeting_id"]], ["committee_id"]
         )
-        if data["meeting"][final["meeting_id"]]["committee_id"] in (
+        committees = self.sql.get_many(
+            "committee",
+            final.get("committee_management_ids") or [],
+            ["all_child_ids"],
+        )
+        if meetings[final["meeting_id"]]["committee_id"] in (
             final.get("committee_management_ids") or []
-        ) or data["meeting"][final["meeting_id"]]["committee_id"] in [
+        ) or meetings[final["meeting_id"]]["committee_id"] in [
             child_id
-            for committee in data.get("committee", {}).values()
+            for committee in committees.values()
             for child_id in committee.get("all_child_ids", [])
         ]:
             self._add_message(
@@ -228,7 +217,7 @@ class CheckLockOutPermissionMixin(Action):
         filter_: Filter = And(filters)
         if newly_locked and meeting_id:
             filter_ = Or(FilterOperator("meeting_id", "=", meeting_id), filter_)
-        locked_from_meeting_users = self.datastore.filter(
+        locked_from_meeting_users = self.sql.filter(
             "meeting_user", filter_, ["meeting_id"]
         )
         locked_from_meeting_ids = {
@@ -269,29 +258,22 @@ class CheckLockOutPermissionMixin(Action):
         raise_exception: bool,
     ) -> None:
         if committee_ids := instance.get("committee_management_ids"):
-            committees = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "committee",
-                        committee_ids,
-                        ["meeting_ids", "id", "all_child_ids"],
-                    )
-                ]
-            )["committee"]
-            child_committees = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "committee",
-                        [
-                            child_id
-                            for committee in committees.values()
-                            for child_id in committee.get("all_child_ids", [])
-                            if child_id not in committees
-                        ],
-                        ["meeting_ids", "id"],
-                    )
-                ]
-            )["committee"]
+            committees = self.sql.get_many(
+                "committee",
+                committee_ids,
+                ["meeting_ids", "id", "all_child_ids"],
+            )
+            child_committee_ids = [
+                child_id
+                for committee in committees.values()
+                for child_id in committee.get("all_child_ids", [])
+                if child_id not in committees
+            ]
+            child_committees = self.sql.get_many(
+                "committee",
+                child_committee_ids,
+                ["meeting_ids", "id"],
+            ) if child_committee_ids else {}
             meeting_id_to_committee_id = {
                 meeting_id: committee["id"]
                 for committee in [*committees.values(), *child_committees.values()]
@@ -325,16 +307,16 @@ class CheckLockOutPermissionMixin(Action):
 class MeetingUserMixin(MeetingUserHistoryMixin):
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        meeting_user_self = self.datastore.get(
-            fqid_from_collection_and_id("meeting_user", instance["id"]),
+        meeting_user_self = self.sql.get(
+            "meeting_user",
+            instance["id"],
             [
                 "vote_delegated_to_id",
                 "vote_delegations_from_ids",
                 "user_id",
                 "meeting_id",
             ],
-            raise_exception=False,
-        )
+        ) or {}
         if "vote_delegations_from_ids" in instance:
             meeting_user_self.update(
                 {"vote_delegations_from_ids": instance["vote_delegations_from_ids"]}
@@ -378,12 +360,11 @@ class MeetingUserMixin(MeetingUserHistoryMixin):
                 raise ActionException(
                     f"User {user_id_self} cannot delegate his vote, because there are votes delegated to him."
                 )
-            meeting_user_delegated_to = self.datastore.get(
-                fqid_from_collection_and_id(
-                    "meeting_user", instance["vote_delegated_to_id"]
-                ),
+            meeting_user_delegated_to = self.sql.get(
+                "meeting_user",
+                instance["vote_delegated_to_id"],
                 ["vote_delegated_to_id", "user_id", "meeting_id"],
-            )
+            ) or {}
             if meeting_user_delegated_to.get("meeting_id") != meeting_id_self:
                 raise ActionException(
                     f"User {meeting_user_delegated_to.get('user_id')}'s delegation id don't belong to meeting {meeting_id_self}."
@@ -415,10 +396,11 @@ class MeetingUserMixin(MeetingUserHistoryMixin):
         vote_error_user_ids: list[int] = []
         meeting_error_user_ids: list[int] = []
         for meeting_user_id in delegated_from_ids:
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id("meeting_user", meeting_user_id),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                meeting_user_id,
                 ["vote_delegations_from_ids", "user_id", "meeting_id"],
-            )
+            ) or {}
             if meeting_user.get("meeting_id") != meeting_id_self:
                 meeting_error_user_ids.append(cast(int, meeting_user.get("user_id")))
             if meeting_user.get("vote_delegations_from_ids") and meeting_user[

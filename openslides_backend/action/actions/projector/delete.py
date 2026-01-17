@@ -3,7 +3,6 @@ from typing import Any
 from ....models.models import Projector
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -21,10 +20,10 @@ class ProjectorDelete(DeleteAction):
     permission = Permissions.Projector.CAN_MANAGE
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        projector = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        projector = self.sql.get(
+            self.model.collection, instance["id"],
             ["used_as_reference_projector_meeting_id", "meeting_id"],
-        )
+        ) or {}
         if (
             meeting_id := projector.get("used_as_reference_projector_meeting_id")
         ) and not self.is_meeting_to_be_deleted(meeting_id):

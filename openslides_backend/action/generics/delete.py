@@ -20,7 +20,18 @@ from ..util.typing import ActionData
 class DeleteAction(Action):
     """
     Generic delete action.
+
+    Uses direct SQL for deleting via self.sql.delete().
+    The PostgreSQL transaction ensures consistency.
+
+    Handles OnDelete behaviors:
+    - CASCADE: Recursively deletes related models
+    - PROTECT: Prevents deletion if related models exist
+    - SET_NULL: Sets the relation field to NULL on related models
     """
+
+    # Set to True to use direct SQL instead of events (default for new code)
+    use_direct_sql: bool = True
 
     def base_update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         """
@@ -36,12 +47,14 @@ class DeleteAction(Action):
             field.get_own_field_name() for field in self.model.get_relation_fields()
         ]
         # Fetch db instance with all relevant fields
-        # Executed before update_instance so that actions can manually set a
-        # DeletedModel or other changed_models without changing the result of this.
-        db_instance = self.datastore.get(
-            fqid=this_fqid,
-            mapped_fields=relevant_fields,
+        # Use sql.get for direct database access
+        db_instance = self.sql.get(
+            self.model.collection,
+            instance["id"],
+            relevant_fields,
         )
+        if not db_instance:
+            db_instance = {}
 
         # Update instance (by default this does nothing)
         instance = self.update_instance(instance)
@@ -106,7 +119,18 @@ class DeleteAction(Action):
         return instance
 
     def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+        """
+        Creates delete events for one instance of the current model.
+
+        If use_direct_sql is True, this also deletes directly from the database.
+        Events are still generated for history tracking and backward compatibility.
+        """
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
+
+        # Direct SQL delete if enabled
+        if self.use_direct_sql:
+            self.sql.delete(self.model.collection, instance["id"])
+
         yield self.build_event(EventType.Delete, fqid)
 
     def is_meeting_to_be_deleted(self, meeting_id: int) -> bool:

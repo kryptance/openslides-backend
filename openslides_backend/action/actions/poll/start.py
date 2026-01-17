@@ -5,7 +5,6 @@ from openslides_backend.action.mixins.extend_history_mixin import ExtendHistoryM
 
 from ....models.models import Poll
 from ....shared.exceptions import ActionException, VoteServiceException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -32,10 +31,10 @@ class PollStartAction(
     extend_history_to = "content_object_id"
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        poll = self.sql.get(
+            self.model.collection, instance["id"],
             ["state", "meeting_id", "type"],
-        )
+        ) or {}
         if poll.get("type") == Poll.TYPE_ANALOG:
             raise ActionException(
                 "Analog polls cannot be started. Please use poll.update instead to give votes."
@@ -47,13 +46,13 @@ class PollStartAction(
         instance["state"] = Poll.STATE_STARTED
 
         # restart projector countdown given by the meeting
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", poll["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", poll["meeting_id"],
             [
                 "poll_couple_countdown",
                 "poll_countdown_id",
             ],
-        )
+        ) or {}
         if meeting.get("poll_couple_countdown") and meeting.get("poll_countdown_id"):
             self.control_countdown(
                 meeting["poll_countdown_id"], CountdownCommand.RESTART

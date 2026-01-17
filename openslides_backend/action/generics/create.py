@@ -10,12 +10,19 @@ from ..util.typing import ActionData, ActionResultElement
 class CreateAction(Action):
     """
     Generic create action.
+
+    Uses direct SQL for writing via self.sql.insert().
+    The PostgreSQL transaction ensures consistency.
     """
+
+    # Set to True to use direct SQL instead of events (default for new code)
+    use_direct_sql: bool = True
 
     def prepare_action_data(self, action_data: ActionData) -> ActionData:
         if not action_data:
             return action_data
-        new_ids = self.datastore.reserve_ids(
+        # Use sql.reserve_ids for direct SQL access
+        new_ids = self.sql.reserve_ids(
             collection=self.model.collection, amount=len(list(action_data))
         )
         for instance, new_id in zip(action_data, new_ids):
@@ -45,8 +52,22 @@ class CreateAction(Action):
     def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
         """
         Creates events for one instance of the current model.
+
+        If use_direct_sql is True, this also writes directly to the database.
+        Events are still generated for history tracking and backward compatibility.
         """
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
+
+        # Clean up meta fields before writing
+        write_instance = {
+            k: v for k, v in instance.items() if not k.startswith("meta_")
+        }
+
+        # Direct SQL write if enabled
+        if self.use_direct_sql:
+            self.sql.insert(self.model.collection, write_instance, instance["id"])
+
+        # Still yield the event for history tracking
         if "meta_new" in instance:
             del instance["meta_new"]
         yield self.build_event(EventType.Create, fqid, instance)

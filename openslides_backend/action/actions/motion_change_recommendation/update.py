@@ -5,7 +5,6 @@ from openslides_backend.action.util.register import register_action
 
 from ....models.models import MotionChangeRecommendation
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.filters import FilterOperator
 from ...action import original_instances
@@ -46,15 +45,11 @@ class MotionChangeRecommendationUpdateAction(ExtendHistoryMixin, UpdateAction):
             if any(field in payload for field in line_change_fields)
         }
         if line_changes:
-            line_change_data = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "motion_change_recommendation",
-                        list(line_changes),
-                        ["motion_id", *line_change_fields],
-                    )
-                ]
-            )["motion_change_recommendation"]
+            line_change_data = self.sql.get_many(
+                "motion_change_recommendation",
+                list(line_changes),
+                ["motion_id", *line_change_fields],
+            )
             motion_id_to_reco_id_to_payload = {}
             for id_, payload in line_changes.items():
                 line_change_data[id_].update(payload)
@@ -75,7 +70,7 @@ class MotionChangeRecommendationUpdateAction(ExtendHistoryMixin, UpdateAction):
                         f"Cannot edit motion_change_recommendation/{id_}: New line span would have its from line after its to line."
                     )
             for motion_id, new_reco_data in motion_id_to_reco_id_to_payload.items():
-                motion_reco_data = self.datastore.filter(
+                motion_reco_data = self.sql.filter(
                     "motion_change_recommendation",
                     FilterOperator("motion_id", "=", motion_id),
                     line_change_fields,

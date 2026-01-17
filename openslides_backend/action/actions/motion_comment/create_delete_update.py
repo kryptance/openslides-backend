@@ -30,11 +30,12 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
             instance, ["write_group_ids", "meeting_id", "submitter_can_write"]
         )
         meeting_id = section["meeting_id"]
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["admin_group_id", "committee_id"],
             lock_result=False,
-        )
+        ) or {}
 
         allowed_groups = set(section.get("write_group_ids", []))
         allowed_groups.add(meeting["admin_group_id"])
@@ -47,11 +48,13 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
         ):
             return
 
-        user_orga_management_level = self.datastore.get(
-            fqid_from_collection_and_id("user", self.user_id),
+        user = self.sql.get(
+            "user",
+            self.user_id,
             ["organization_management_level"],
             lock_result=False,
-        ).get("organization_management_level")
+        ) or {}
+        user_orga_management_level = user.get("organization_management_level")
         if user_orga_management_level in [
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
             OrganizationManagementLevel.SUPERADMIN,
@@ -61,7 +64,7 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
         if section.get("submitter_can_write"):
             motion_id = self.get_field_from_instance("motion_id", instance)
 
-            meeting_user = self.datastore.filter(
+            meeting_user = self.sql.filter(
                 "meeting_user",
                 And(
                     FilterOperator("user_id", "=", self.user_id),
@@ -72,7 +75,7 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
             meeting_user_id = None
             if meeting_user:
                 meeting_user_id = int(list(meeting_user)[0])
-            if motion_id and self.datastore.exists(
+            if motion_id and self.sql.exists(
                 "motion_submitter",
                 And(
                     FilterOperator("meeting_user_id", "=", meeting_user_id),
@@ -93,11 +96,12 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
         self, instance: dict[str, Any], fields: list[str]
     ) -> dict[str, Any]:
         section_id = self.get_field_from_instance("section_id", instance)
-        return self.datastore.get(
-            fqid_from_collection_and_id("motion_comment_section", section_id),
+        return self.sql.get(
+            "motion_comment_section",
+            section_id,
             fields,
             lock_result=False,
-        )
+        ) or {}
 
     def get_history_information(self) -> HistoryInformation | None:
         instances = self.get_instances_with_fields(["motion_id", "section_id"])
@@ -124,8 +128,8 @@ class MotionCommentCreate(MotionCommentMixin, CreateActionWithInferredMeeting):
             FilterOperator("motion_id", "=", instance["motion_id"]),
             FilterOperator("meeting_id", "=", instance["meeting_id"]),
         )
-        exists = self.datastore.exists(
-            collection=self.model.collection, filter_=filter_
+        exists = self.sql.exists(
+            self.model.collection, filter_
         )
         if exists:
             raise ActionException(

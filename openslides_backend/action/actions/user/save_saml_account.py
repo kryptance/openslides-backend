@@ -70,11 +70,12 @@ class UserSaveSamlAccount(
     skip_archived_meeting_check = True
 
     def validate_instance(self, instance: dict[str, Any]) -> None:
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization",
+            1,
             ["saml_enabled", "saml_attr_mapping"],
             lock_result=False,
-        )
+        ) or {}
         if not organization.get("saml_enabled"):
             raise ActionException(
                 "SingleSignOn is not enabled in OpenSlides configuration"
@@ -158,7 +159,7 @@ class UserSaveSamlAccount(
         pass
 
     def base_update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        users = self.datastore.filter(
+        users = self.sql.filter(
             "user",
             FilterOperator("saml_id", "=", instance["saml_id"]),
             [
@@ -170,7 +171,7 @@ class UserSaveSamlAccount(
             ],
         )
         if gender := instance.pop("gender", None):
-            gender_dict = self.datastore.filter(
+            gender_dict = self.sql.filter(
                 "gender",
                 FilterOperator("name", "=", gender),
                 ["id"],
@@ -330,7 +331,7 @@ class UserSaveSamlAccount(
         meetings = {
             meeting_id: meeting
             for meeting_id, meeting in sorted(
-                self.datastore.filter(
+                self.sql.filter(
                     "meeting",
                     Or(
                         FilterOperator("external_id", "=", external_meeting_id)
@@ -491,7 +492,7 @@ class UserSaveSamlAccount(
         If none of the groups exists in the meeting, the meetings default group is returned.
         """
         if group_names:
-            groups = self.datastore.filter(
+            groups = self.sql.filter(
                 "group",
                 And(
                     FilterOperator("meeting_id", "=", meeting["id"]),
@@ -522,7 +523,7 @@ class UserSaveSamlAccount(
         """
         if structure_level_names:
             meeting_id = meeting["id"]
-            found_structure_levels = self.datastore.filter(
+            found_structure_levels = self.sql.filter(
                 "structure_level",
                 And(
                     FilterOperator("meeting_id", "=", meeting_id),

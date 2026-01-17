@@ -23,11 +23,11 @@ class MediafileCalculatedFieldsMixin(Action):
     ) -> ActionData:
         if not meeting_id:
             meeting_id = instance["meeting_id"]
-        mediafile = self.datastore.get(
-            fqid_from_collection_and_id("mediafile", instance["id"]), ["child_ids"]
-        )
+        mediafile = self.sql.get(
+            "mediafile", instance["id"], ["child_ids"]
+        ) or {}
         if child_ids := mediafile.get("child_ids"):
-            meeting_mediafile_children = self.datastore.filter(
+            meeting_mediafile_children = self.sql.filter(
                 "meeting_mediafile",
                 And(
                     FilterOperator("meeting_id", "=", meeting_id),
@@ -104,17 +104,16 @@ def calculate_inherited_groups_helper_with_parent_id(
 
 
 def calculate_inherited_groups_helper_with_parent_meeting_mediafile_id(
-    datastore: Database,
+    sql: Any,
     access_group_ids: list[int] | None,
     parent_meeting_mediafile_id: int | None,
 ) -> tuple[bool, list[int] | None]:
     if parent_meeting_mediafile_id:
-        parent = datastore.get(
-            fqid_from_collection_and_id(
-                "meeting_mediafile", parent_meeting_mediafile_id
-            ),
+        parent = sql.get(
+            "meeting_mediafile",
+            parent_meeting_mediafile_id,
             ["is_public", "inherited_access_group_ids"],
-        )
+        ) or {}
     else:
         parent = {}
 

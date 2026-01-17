@@ -1,6 +1,5 @@
 from ....models.models import ListOfSpeakers, Speaker
 from ....permissions.permissions import Permissions
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -24,10 +23,10 @@ class ListOfSpeakersDeleteAllSpeakersAction(DeleteAction):
 
     def get_updated_instances(self, action_data: ActionData) -> ActionData:
         for instance in action_data:
-            list_of_speakers = self.datastore.get(
-                fqid_from_collection_and_id("list_of_speakers", instance["id"]),
-                mapped_fields=["speaker_ids"],
-            )
+            list_of_speakers = self.sql.get(
+                "list_of_speakers", instance["id"],
+                ["speaker_ids"],
+            ) or {}
             if list_of_speakers.get("speaker_ids"):
                 yield from [
                     {"id": speaker_id} for speaker_id in list_of_speakers["speaker_ids"]

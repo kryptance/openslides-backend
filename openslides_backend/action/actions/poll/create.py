@@ -1,10 +1,10 @@
 from typing import Any
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
+from openslides_backend.shared.util import ONE_ORGANIZATION_ID
 
 from ....models.models import Poll
 from ....shared.exceptions import ActionException
-from ....shared.patterns import collection_from_fqid, fqid_from_collection_and_id
+from ....shared.patterns import collection_from_fqid, id_from_fqid
 from ....shared.schema import decimal_schema, id_list_schema, optional_fqid_schema
 from ...generics.create import CreateAction
 from ...mixins.forbid_anonymous_group_mixin import ForbidAnonymousGroupMixin
@@ -86,10 +86,11 @@ class PollCreateAction(
 
         # check enabled_electronic_voting
         if instance["type"] in (Poll.TYPE_NAMED, Poll.TYPE_PSEUDOANONYMOUS):
-            organization = self.datastore.get(
-                ONE_ORGANIZATION_FQID,
+            organization = self.sql.get(
+                "organization",
+                ONE_ORGANIZATION_ID,
                 ["enable_electronic_voting"],
-            )
+            ) or {}
             if not organization.get("enable_electronic_voting"):
                 raise ActionException("Electronic voting is not allowed.")
 
@@ -122,13 +123,15 @@ class PollCreateAction(
 
         # check content_object_id motion and state allow_create_poll
         if is_motion_poll:
-            motion = self.datastore.get(instance["content_object_id"], ["state_id"])
+            motion_id = id_from_fqid(instance["content_object_id"])
+            motion = self.sql.get("motion", motion_id, ["state_id"]) or {}
             if not motion.get("state_id"):
                 raise ActionException("Motion doesn't have a state.")
-            state = self.datastore.get(
-                fqid_from_collection_and_id("motion_state", motion["state_id"]),
+            state = self.sql.get(
+                "motion_state",
+                motion["state_id"],
                 ["allow_create_poll"],
-            )
+            ) or {}
             if not state.get("allow_create_poll"):
                 raise ActionException("Motion state doesn't allow to create poll.")
 

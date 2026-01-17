@@ -4,8 +4,6 @@ from typing import Any
 from openslides_backend.action.mixins.extend_history_mixin import ExtendHistoryMixin
 
 from ....models.models import Poll
-from ....services.database.interface import GetManyRequest
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -29,54 +27,38 @@ class PollResetAction(
     extend_history_to = "content_object_id"
 
     def prefetch(self, action_data: ActionData) -> None:
-        result = self.datastore.get_many(
+        poll_ids = list({instance["id"] for instance in action_data})
+        polls = self.sql.get_many(
+            "poll",
+            poll_ids,
             [
-                GetManyRequest(
-                    "poll",
-                    list({instance["id"] for instance in action_data}),
-                    [
-                        "content_object_id",
-                        "meeting_id",
-                        "type",
-                        "voted_ids",
-                        "option_ids",
-                        "global_option_id",
-                    ],
-                ),
+                "content_object_id",
+                "meeting_id",
+                "type",
+                "voted_ids",
+                "option_ids",
+                "global_option_id",
             ],
-            use_changed_models=False,
         )
-        polls = result["poll"].values()
-        meeting_ids = list({poll["meeting_id"] for poll in polls})
+        meeting_ids = list({poll["meeting_id"] for poll in polls.values()})
         option_ids = [
             option_id
-            for poll in polls
+            for poll in polls.values()
             if poll.get("option_ids")
             for option_id in poll["option_ids"]
         ]
-        requests = [
-            GetManyRequest(
-                "meeting",
-                meeting_ids,
-                [
-                    "is_active_in_organization_id",
-                    "name",
-                ],
-            ),
-            GetManyRequest(
-                "option",
-                option_ids,
-                ["vote_ids"],
-            ),
-        ]
-        self.datastore.get_many(requests, use_changed_models=False)
+        # Prefetch meetings and options
+        self.sql.get_many(
+            "meeting",
+            meeting_ids,
+            ["is_active_in_organization_id", "name"],
+        )
+        self.sql.get_many("option", option_ids, ["vote_ids"])
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance["state"] = Poll.STATE_CREATED
         self.delete_all_votes(instance["id"])
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]), ["type"]
-        )
+        poll = self.sql.get(self.model.collection, instance["id"], ["type"]) or {}
         instance["is_pseudoanonymized"] = poll.get("type") == Poll.TYPE_PSEUDOANONYMOUS
         instance["voted_ids"] = []
         instance["entitled_users_at_stop"] = None
@@ -95,22 +77,18 @@ class PollResetAction(
                 self._clear_option_auto_fields(option_id)
 
     def _get_option_ids(self, poll_id: int) -> list[int]:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, poll_id),
-            ["option_ids", "global_option_id"],
-        )
+        poll = self.sql.get(
+            self.model.collection, poll_id, ["option_ids", "global_option_id"]
+        ) or {}
         option_ids = poll.get("option_ids", [])
         if poll.get("global_option_id"):
             option_ids.append(poll["global_option_id"])
         return option_ids
 
     def _get_options(self, option_ids: list[int]) -> dict[int, dict[str, Any]]:
-        get_many_request = GetManyRequest("option", option_ids, ["vote_ids"])
-        gm_result = self.datastore.get_many(
-            [get_many_request], use_changed_models=False
+        options: dict[int, dict[str, Any]] = self.sql.get_many(
+            "option", option_ids, ["vote_ids"]
         )
-        options: dict[int, dict[str, Any]] = gm_result.get("option", {})
-
         return options
 
     def _delete_votes(self, vote_ids: list[int]) -> None:

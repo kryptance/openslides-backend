@@ -1,6 +1,5 @@
 from typing import Any, cast
 
-from openslides_backend.services.database.commands import GetManyRequest
 from openslides_backend.shared.mixins.user_create_update_permissions_mixin import (
     CreateUpdatePermissionsFailingFields,
     PermissionVarStore,
@@ -255,21 +254,16 @@ class BaseUserImport(BaseImportAction):
                 "can_change_own_password",
             ],
         )
-        result = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "committee",
-                    [
-                        id
-                        for row in self.rows
-                        if (id := row["data"].get("home_committee", {}).get("id"))
-                    ],
-                    ["name"],
-                ),
-            ],
+        committee_ids = [
+            id
+            for row in self.rows
+            if (id := row["data"].get("home_committee", {}).get("id"))
+        ]
+        result = self.sql.get_many(
+            "committee", committee_ids, ["name"],
             lock_result=False,
             use_changed_models=False,
-        )
+        ) if committee_ids else {}
         self.committee_map = {
-            k: v["name"] for k, v in result.get("committee", {}).items()
+            k: v["name"] for k, v in result.items()
         }

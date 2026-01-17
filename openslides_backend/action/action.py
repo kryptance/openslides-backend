@@ -22,6 +22,7 @@ from ..permissions.permissions import Permission
 from ..presenter.base import BasePresenter
 from ..services.database.commands import GetManyRequest
 from ..services.database.interface import Database
+from ..services.database.sql_helper import SqlHelper
 from ..shared.exceptions import (
     ActionException,
     AnonymousNotAllowed,
@@ -106,6 +107,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
     own_history_information_first: bool = False
 
     relation_manager: RelationManager
+    sql: SqlHelper  # Direct SQL access for reading and writing
 
     action_data: ActionData
     instances: list[dict[str, Any]]
@@ -123,6 +125,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         env: Env,
         skip_archived_meeting_check: bool | None = None,
         use_meeting_ids_for_archived_meeting_check: bool | None = None,
+        sql: SqlHelper | None = None,
     ) -> None:
         super().__init__(services, datastore, logging)
         self.relation_manager = relation_manager
@@ -134,6 +137,11 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             self.use_meeting_ids_for_archived_meeting_check = (
                 use_meeting_ids_for_archived_meeting_check
             )
+        # Initialize SqlHelper if provided, otherwise create from datastore connection
+        if sql is not None:
+            self.sql = sql
+        else:
+            self.sql = SqlHelper(self.datastore.connection, logging, env)
         self.events = []
         self.results = []
         self.cascaded_actions_history = {}
@@ -778,6 +786,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
                 self.logging,
                 self.env,
                 skip_archived_meeting_check,
+                sql=self.sql,  # Pass the same SqlHelper instance for transaction consistency
             )
             write_request, action_results = action.perform(
                 action_data, self.user_id, internal=True, is_sub_call=True

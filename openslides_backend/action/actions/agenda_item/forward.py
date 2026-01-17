@@ -105,10 +105,10 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
 
     def get_meeting_id(self, instance: dict[str, Any]) -> int:
         if origin_item_ids := instance.get("agenda_item_ids"):
-            return self.datastore.get(
-                fqid_from_collection_and_id("agenda_item", origin_item_ids[0]),
-                ["meeting_id"],
-            )["meeting_id"]
+            agenda_item = self.sql.get(
+                "agenda_item", origin_item_ids[0], ["meeting_id"]
+            ) or {}
+            return agenda_item["meeting_id"]
         elif origin_item_ids == []:
             raise ActionException(
                 "Cannot forward an agenda without the agenda_item_ids."
@@ -119,13 +119,9 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         meeting_ids = set(instance.get("meeting_ids", []))
-        agenda_items = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "agenda_item", instance.get("agenda_item_ids", []), ["meeting_id"]
-                )
-            ]
-        )["agenda_item"]
+        agenda_items = self.sql.get_many(
+            "agenda_item", instance.get("agenda_item_ids", []), ["meeting_id"]
+        )
         meeting_ids.update({item["meeting_id"] for item in agenda_items.values()})
         forbidden_meeting_ids = {
             meeting_id
@@ -188,21 +184,18 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
 
         Checks all data that can be checked at this stage.
         """
-        data = self.datastore.get_many(
+        agenda_items = self.sql.get_many(
+            "agenda_item",
+            origin_item_ids,
             [
-                GetManyRequest(
-                    "agenda_item",
-                    origin_item_ids,
-                    [
-                        "id",
-                        "content_object_id",
-                        *TRANSFERRABLE_AGENDA_FIELD,
-                        "meeting_id",
-                        "parent_id",
-                    ],
-                )
-            ]
+                "id",
+                "content_object_id",
+                *TRANSFERRABLE_AGENDA_FIELD,
+                "meeting_id",
+                "parent_id",
+            ],
         )
+        data: dict[str, dict[int, dict[str, Any]]] = {"agenda_item": agenda_items}
 
         self.meeting_id = data["agenda_item"][next(iter(data["agenda_item"]))][
             "meeting_id"
@@ -299,11 +292,10 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
             target_meeting_id, origin_mediafiles, target_meeting
         )
         max_weight = (
-            self.datastore.max(
+            self.sql.max(
                 "agenda_item",
                 FilterOperator("meeting_id", "=", target_meeting_id),
                 "weight",
-                use_changed_models=False,
             )
             or 0
         )
@@ -349,15 +341,11 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
             origin_meeting_mediafiles,
             parent_id,
         )
-        new_topics = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "topic",
-                    list(topic_id_to_tree_node),
-                    ["list_of_speakers_id", "agenda_item_id"],
-                )
-            ]
-        )["topic"]
+        new_topics = self.sql.get_many(
+            "topic",
+            list(topic_id_to_tree_node),
+            ["list_of_speakers_id", "agenda_item_id"],
+        )
 
         self.update_loss(new_topics, topic_id_to_tree_node)
 
@@ -410,7 +398,7 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
             origin_to_new_id = {
                 origin_id: id_
                 for id_, origin_id in zip(
-                    self.datastore.reserve_ids("mediafile", len(unpublished_ids)),
+                    self.sql.reserve_ids("mediafile", len(unpublished_ids)),
                     unpublished_ids,
                 )
             }
@@ -467,25 +455,22 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         Returns a origin-meeting-model-id to target-meeting-model-id dicts for
         meeting_users, groups, structure_levels and poocs in that order.
         """
-        # using gmrs instead of filters bc probably more performant in this case
-        gmrs = [
-            GetManyRequest(collection, ids, fields)
-            for collection, from_field, fields in [
-                (
-                    "meeting_user",
-                    "meeting_user_ids",
-                    ["user_id", "group_ids", "structure_level_ids"],
-                ),
-                ("group", "group_ids", ["name"]),
-                ("structure_level", "structure_level_ids", ["name"]),
-                ("point_of_order_category", "point_of_order_category_ids", ["text"]),
-            ]
-            if (ids := target_meeting.get(from_field, []))
-        ]
-        if gmrs:
-            target_meeting_models = self.datastore.get_many(gmrs)
-        else:
-            target_meeting_models = {}
+        # using separate get_many calls for each collection
+        target_meeting_models: dict[str, dict[int, dict[str, Any]]] = {}
+        for collection, from_field, fields in [
+            (
+                "meeting_user",
+                "meeting_user_ids",
+                ["user_id", "group_ids", "structure_level_ids"],
+            ),
+            ("group", "group_ids", ["name"]),
+            ("structure_level", "structure_level_ids", ["name"]),
+            ("point_of_order_category", "point_of_order_category_ids", ["text"]),
+        ]:
+            if ids := target_meeting.get(from_field, []):
+                target_meeting_models[collection] = self.sql.get_many(
+                    collection, ids, fields
+                )
 
         pooc_matches = self.create_and_update_poocs(
             target_meeting_id,
@@ -618,15 +603,11 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         }
         while len(child_id_to_curr_parent_id) > 0:
             agenda_items.update(
-                self.datastore.get_many(
-                    [
-                        GetManyRequest(
-                            "agenda_item",
-                            list(set(child_id_to_curr_parent_id.values())),
-                            ["parent_id"],
-                        )
-                    ]
-                )["agenda_item"]
+                self.sql.get_many(
+                    "agenda_item",
+                    list(set(child_id_to_curr_parent_id.values())),
+                    ["parent_id"],
+                )
             )
             for id_, curr_parent_id in list(child_id_to_curr_parent_id.items()):
                 if (
@@ -750,31 +731,29 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         """
         Helper function to load data.
         """
-        return self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "topic",
-                    [
-                        id_from_fqid(item["content_object_id"])
-                        for item in agenda_items.values()
-                    ],
-                    [*TRANSFERRABLE_TOPIC_FIELDS, "list_of_speakers_id"],
-                ),
-                GetManyRequest(
-                    "meeting",
-                    [self.meeting_id, *target_meeting_ids],
-                    [
-                        "admin_group_id",
-                        "committee_id",
-                        "meeting_user_ids",
-                        "group_ids",
-                        "structure_level_ids",
-                        "point_of_order_category_ids",
-                        "is_active_in_organization_id",
-                    ],
-                ),
-            ]
+        topic_ids = [
+            id_from_fqid(item["content_object_id"])
+            for item in agenda_items.values()
+        ]
+        topics = self.sql.get_many(
+            "topic",
+            topic_ids,
+            [*TRANSFERRABLE_TOPIC_FIELDS, "list_of_speakers_id"],
         )
+        meetings = self.sql.get_many(
+            "meeting",
+            [self.meeting_id, *target_meeting_ids],
+            [
+                "admin_group_id",
+                "committee_id",
+                "meeting_user_ids",
+                "group_ids",
+                "structure_level_ids",
+                "point_of_order_category_ids",
+                "is_active_in_organization_id",
+            ],
+        )
+        return {"topic": topics, "meeting": meetings}
 
     def get_all_meeting_mediafile_and_los_data(
         self,
@@ -786,15 +765,18 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         """
         Helper function to load data.
         """
-        gmrs: list[GetManyRequest] = []
+        result: dict[str, dict[int, dict[str, Any]]] = {}
         if with_attachments:
-            gmrs = self.get_gmr_list_from_relation_field(
-                "meeting_mediafile",
-                ["mediafile_id"],
-                topics,
-                "attachment_meeting_mediafile_ids",
-                is_list_field=True,
-            )
+            # Get meeting_mediafile ids from topics
+            mm_ids = list({
+                id_
+                for topic in topics.values()
+                for id_ in topic.get("attachment_meeting_mediafile_ids", [])
+            })
+            if mm_ids:
+                result["meeting_mediafile"] = self.sql.get_many(
+                    "meeting_mediafile", mm_ids, ["mediafile_id"]
+                )
         los_fields: list[str] = []
         if with_speakers:
             los_fields = [
@@ -805,15 +787,16 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         if with_moderator_notes:
             los_fields.append("moderator_notes")
         if los_fields:
-            gmrs.extend(
-                self.get_gmr_list_from_relation_field(
-                    "list_of_speakers",
-                    los_fields,
-                    topics,
-                    "list_of_speakers_id",
+            los_ids = list({
+                id_
+                for topic in topics.values()
+                if (id_ := topic.get("list_of_speakers_id"))
+            })
+            if los_ids:
+                result["list_of_speakers"] = self.sql.get_many(
+                    "list_of_speakers", los_ids, los_fields
                 )
-            )
-        return self.datastore.get_many(gmrs)
+        return result
 
     def get_direct_mediafile_and_all_speaker_and_sllos_data(
         self,
@@ -823,41 +806,52 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         """
         Helper function to load data.
         """
-        gmrs = [
-            *self.get_gmr_list_from_relation_field(
-                "mediafile",
-                MEDIAFILE_FIELDS,
-                meeting_mediafiles,
-                "mediafile_id",
-            ),
-            *self.get_gmr_list_from_relation_field(
+        result: dict[str, dict[int, dict[str, Any]]] = {}
+        # Get mediafiles from meeting_mediafiles
+        mediafile_ids = list({
+            id_
+            for mm in meeting_mediafiles.values()
+            if (id_ := mm.get("mediafile_id"))
+        })
+        if mediafile_ids:
+            result["mediafile"] = self.sql.get_many(
+                "mediafile", mediafile_ids, MEDIAFILE_FIELDS
+            )
+        # Get speakers from lists_of_speakers
+        speaker_ids = list({
+            id_
+            for los in lists_of_speakers.values()
+            for id_ in los.get("speaker_ids", [])
+        })
+        if speaker_ids:
+            result["speaker"] = self.sql.get_many(
                 "speaker",
+                speaker_ids,
                 [
                     *TRANSFERRABLE_SPEAKER_FIELDS,
                     "structure_level_list_of_speakers_id",
                     "meeting_user_id",
                     "point_of_order_category_id",
                 ],
-                lists_of_speakers,
-                "speaker_ids",
-                is_list_field=True,
-            ),
-            *self.get_gmr_list_from_relation_field(
+            )
+        # Get structure_level_list_of_speakers from lists_of_speakers
+        sllos_ids = list({
+            id_
+            for los in lists_of_speakers.values()
+            for id_ in los.get("structure_level_list_of_speakers_ids", [])
+        })
+        if sllos_ids:
+            result["structure_level_list_of_speakers"] = self.sql.get_many(
                 "structure_level_list_of_speakers",
+                sllos_ids,
                 [
                     "structure_level_id",
                     "initial_time",
                     "additional_time",
                     "remaining_time",
                 ],
-                lists_of_speakers,
-                "structure_level_list_of_speakers_ids",
-                is_list_field=True,
-            ),
-        ]
-        if gmrs:
-            return self.datastore.get_many(gmrs)
-        return {}
+            )
+        return result
 
     def get_mediafile_children_and_all_meeting_users_and_poocs(
         self,
@@ -867,30 +861,45 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         """
         Helper function to load data.
         """
-        gmrs = [
-            *self.get_gmr_list_with_mediafile_child_gmr(mediafiles, mediafiles),
-            *self.get_gmr_list_from_relation_field(
+        result: dict[str, dict[int, dict[str, Any]]] = {}
+        # Get mediafile children
+        child_ids = list({
+            child_id
+            for mediafile in mediafiles.values()
+            for child_id in mediafile.get("child_ids", [])
+        } - set(mediafiles))
+        if child_ids:
+            result["mediafile"] = self.sql.get_many(
+                "mediafile", child_ids, MEDIAFILE_FIELDS
+            )
+        # Get meeting_users from speakers
+        muser_ids = list({
+            id_
+            for speaker in speakers.values()
+            if (id_ := speaker.get("meeting_user_id"))
+        })
+        if muser_ids:
+            result["meeting_user"] = self.sql.get_many(
                 "meeting_user",
+                muser_ids,
                 [
                     "user_id",
                     "group_ids",
                     "structure_level_ids",
                     *TRANSFERRABLE_MEETING_USER_FIELDS,
                 ],
-                speakers,
-                "meeting_user_id",
-            ),
-            *self.get_gmr_list_from_relation_field(
-                "point_of_order_category",
-                TRANSFERRABLE_POOC_FIELDS,
-                speakers,
-                "point_of_order_category_id",
-            ),
-        ]
-
-        if gmrs:
-            return self.datastore.get_many(gmrs)
-        return {}
+            )
+        # Get point_of_order_categories from speakers
+        pooc_ids = list({
+            id_
+            for speaker in speakers.values()
+            if (id_ := speaker.get("point_of_order_category_id"))
+        })
+        if pooc_ids:
+            result["point_of_order_category"] = self.sql.get_many(
+                "point_of_order_category", pooc_ids, TRANSFERRABLE_POOC_FIELDS
+            )
+        return result
 
     def get_mediafile_grandchildren_and_all_groups_and_structure_levels(
         self,
@@ -902,18 +911,26 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         """
         Helper function to load data.
         """
-        gmrs = [
-            *self.get_gmr_list_with_mediafile_child_gmr(
-                last_loaded_mediafiles, all_mediafiles
-            ),
-            *self.get_gmr_list_from_relation_field(
-                "group",
-                ["name"],
-                meeting_users,
-                "group_ids",
-                is_list_field=True,
-            ),
-        ]
+        result: dict[str, dict[int, dict[str, Any]]] = {}
+        # Get mediafile grandchildren
+        child_ids = list({
+            child_id
+            for mediafile in last_loaded_mediafiles.values()
+            for child_id in mediafile.get("child_ids", [])
+        } - set(all_mediafiles))
+        if child_ids:
+            result["mediafile"] = self.sql.get_many(
+                "mediafile", child_ids, MEDIAFILE_FIELDS
+            )
+        # Get groups from meeting_users
+        group_ids = list({
+            id_
+            for meeting_user in meeting_users.values()
+            for id_ in meeting_user.get("group_ids", [])
+        })
+        if group_ids:
+            result["group"] = self.sql.get_many("group", group_ids, ["name"])
+        # Get structure_levels
         structure_level_id_set = {
             id_
             for meeting_user in meeting_users.values()
@@ -923,28 +940,31 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
             {sllos["structure_level_id"] for sllos in slloss.values()}
         )
         if structure_level_id_set:
-            gmrs.append(
-                GetManyRequest(
-                    "structure_level",
-                    list(structure_level_id_set),
-                    TRANSFERRABLE_STRUCTURE_LEVEL_FIELDS,
-                )
+            result["structure_level"] = self.sql.get_many(
+                "structure_level",
+                list(structure_level_id_set),
+                TRANSFERRABLE_STRUCTURE_LEVEL_FIELDS,
             )
-        if gmrs:
-            return self.datastore.get_many(gmrs)
-        return {}
+        return result
 
     def load_remaining_mediafile_descendants(
         self,
         data: dict[str, dict[int, dict[str, Any]]],
         new_mediafiles: dict[int, dict[str, Any]],
     ) -> None:
-        while len(
-            gmrs := self.get_gmr_list_with_mediafile_child_gmr(
-                new_mediafiles, data.get("mediafile", {})
+        while True:
+            # Get child ids not yet loaded
+            all_loaded = data.get("mediafile", {})
+            child_ids = list({
+                child_id
+                for mediafile in new_mediafiles.values()
+                for child_id in mediafile.get("child_ids", [])
+            } - set(all_loaded))
+            if not child_ids:
+                break
+            new_mediafiles = self.sql.get_many(
+                "mediafile", child_ids, MEDIAFILE_FIELDS
             )
-        ):
-            new_mediafiles = self.datastore.get_many(gmrs).get("mediafile", {})
             data["mediafile"].update(new_mediafiles)
 
     def create_topics(

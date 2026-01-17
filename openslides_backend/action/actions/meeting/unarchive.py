@@ -1,11 +1,8 @@
 from typing import Any
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
-
 from ....models.models import Meeting
 from ....permissions.management_levels import OrganizationManagementLevel
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -20,17 +17,17 @@ class MeetingUnarchive(UpdateAction):
     skip_archived_meeting_check = True
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        meeting = self.sql.get(
+            self.model.collection, instance["id"],
             ["committee_id", "is_active_in_organization_id"],
-        )
+        ) or {}
         if meeting.get("is_active_in_organization_id"):
             raise ActionException(f"Meeting {instance['id']} is not archived.")
 
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization", ONE_ORGANIZATION_ID,
             ["active_meeting_ids", "limit_of_meetings"],
-        )
+        ) or {}
         if (
             limit_of_meetings := organization.get("limit_of_meetings", 0)
         ) and limit_of_meetings == len(organization.get("active_meeting_ids", [])):

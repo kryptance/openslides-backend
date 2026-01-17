@@ -4,7 +4,6 @@ from ....models.models import MotionState
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.create_action_with_inferred_meeting import (
     CreateActionWithInferredMeeting,
 )
@@ -53,10 +52,10 @@ class MotionStateCreateAction(WeightMixin, CreateActionWithInferredMeeting):
             raise ActionException(
                 f"This state of workflow {instance['workflow_id']} cannot be the first state of workflow {first_state_of_workflow_id}."
             )
-        workflow = self.datastore.get(
-            fqid_from_collection_and_id("motion_workflow", instance["workflow_id"]),
+        workflow = self.sql.get(
+            "motion_workflow", instance["workflow_id"],
             ["id", "first_state_id", "meeting_id"],
-        )
+        ) or {}
         if first_state_of_workflow_id:
             if (wf_first_state_id := workflow.get("first_state_id")) and instance[
                 "id"

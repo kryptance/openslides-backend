@@ -220,8 +220,9 @@ class MeetingUpdate(
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         # handle set_as_template
         set_as_template = instance.pop("set_as_template", None)
-        db_meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["id"]),
+        db_meeting = self.sql.get(
+            "meeting",
+            instance["id"],
             [
                 "template_for_organization_id",
                 "locked_from_inside",
@@ -229,7 +230,7 @@ class MeetingUpdate(
                 "language",
             ],
             lock_result=False,
-        )
+        ) or {}
         Translator.set_translation_language(db_meeting["language"])
         lock_meeting = (
             instance.get("locked_from_inside")
@@ -245,11 +246,12 @@ class MeetingUpdate(
                 "A meeting cannot be locked from the inside and a template at the same time."
             )
         self.check_locking(instance, set_as_template)
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization",
+            1,
             ["require_duplicate_from", "enable_anonymous"],
             lock_result=False,
-        )
+        ) or {}
         if instance.get("enable_anonymous") and not organization.get(
             "enable_anonymous"
         ):
@@ -272,10 +274,11 @@ class MeetingUpdate(
         if set_as_template is True:
             instance["template_for_organization_id"] = 1
         elif set_as_template is False:
-            admin_group = self.datastore.get(
-                fqid_from_collection_and_id("group", db_meeting["admin_group_id"]),
+            admin_group = self.sql.get(
+                "group",
+                db_meeting["admin_group_id"],
                 ["meeting_user_ids"],
-            )
+            ) or {}
             if not admin_group.get("meeting_user_ids"):
                 raise ActionException(
                     "Can only remove meeting template status if it has at least one administrator."
@@ -288,9 +291,9 @@ class MeetingUpdate(
                 reference_projector_fqid = fqid_from_collection_and_id(
                     "projector", reference_projector_id
                 )
-                projector = self.datastore.get(
-                    reference_projector_fqid, ["is_internal"]
-                )
+                projector = self.sql.get(
+                    "projector", reference_projector_id, ["is_internal"]
+                ) or {}
                 if projector.get("is_internal"):
                     raise ActionException(
                         "An internal projector cannot be set as reference projector."
@@ -317,10 +320,12 @@ class MeetingUpdate(
 
         self.check_start_and_end_time(instance)
 
-        anonymous_group_id = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["id"]),
+        meeting_anon = self.sql.get(
+            "meeting",
+            instance["id"],
             ["anonymous_group_id"],
-        ).get("anonymous_group_id")
+        ) or {}
+        anonymous_group_id = meeting_anon.get("anonymous_group_id")
 
         if instance.get("enable_anonymous") and not anonymous_group_id:
             group_result = self.execute_other_action(
@@ -424,19 +429,22 @@ class MeetingUpdate(
 
     def get_committee_id(self, meeting_id: int) -> int:
         if not hasattr(self, "_committee_id"):
-            self._committee_id = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, meeting_id),
+            meeting = self.sql.get(
+                self.model.collection,
+                meeting_id,
                 ["committee_id"],
                 lock_result=False,
-            )["committee_id"]
+            ) or {}
+            self._committee_id = meeting["committee_id"]
         return self._committee_id
 
     def check_locking(self, instance: dict[str, Any], set_as_template: bool) -> None:
-        db_meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["id"]),
+        db_meeting = self.sql.get(
+            "meeting",
+            instance["id"],
             ["template_for_organization_id", "locked_from_inside", "enable_anonymous"],
             lock_result=False,
-        )
+        ) or {}
         lock_meeting = (
             instance.get("locked_from_inside")
             if instance.get("locked_from_inside") is not None

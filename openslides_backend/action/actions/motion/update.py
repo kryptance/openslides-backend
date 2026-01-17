@@ -10,7 +10,6 @@ from openslides_backend.shared.typing import HistoryInformation
 from ....models.models import Motion
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, PermissionDenied
 from ....shared.patterns import (
     EXTENSION_REFERENCE_IDS_PATTERN,
@@ -76,44 +75,42 @@ class MotionUpdate(
     )
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "motion",
-                    list(
-                        {
-                            instance["id"]
-                            for instance in action_data
-                            if instance.get("id")
-                        }
-                    ),
-                    [
-                        "meeting_id",
-                        "id",
-                        "lead_motion_id",
-                        "identical_motion_ids",
-                        "category_id",
-                        "block_id",
-                        "tag_ids",
-                        "attachment_meeting_mediafile_ids",
-                        "recommendation_extension_reference_ids",
-                        "state_id",
-                        "submitter_ids",
-                        "text",
-                        "amendment_paragraphs",
-                    ],
-                )
-            ]
+        motion_ids = list(
+            {
+                instance["id"]
+                for instance in action_data
+                if instance.get("id")
+            }
         )
+        if motion_ids:
+            self.sql.get_many(
+                "motion", motion_ids,
+                [
+                    "meeting_id",
+                    "id",
+                    "lead_motion_id",
+                    "identical_motion_ids",
+                    "category_id",
+                    "block_id",
+                    "tag_ids",
+                    "attachment_meeting_mediafile_ids",
+                    "recommendation_extension_reference_ids",
+                    "state_id",
+                    "submitter_ids",
+                    "text",
+                    "amendment_paragraphs",
+                ],
+            )
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
         timestamp = datetime.now(ZoneInfo("UTC"))
         instance["last_modified"] = timestamp
-        motion = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        motion = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["meeting_id"],
-        )
+        ) or {}
         error_messages = self.get_update_payload_integrity_error_message(
             instance, motion["meeting_id"]
         )
@@ -132,19 +129,22 @@ class MotionUpdate(
 
         if instance.get("workflow_id"):
             workflow_id = instance.pop("workflow_id")
-            motion = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            motion = self.sql.get(
+                self.model.collection,
+                instance["id"],
                 ["state_id", "workflow_timestamp"],
-            )
-            state = self.datastore.get(
-                fqid_from_collection_and_id("motion_state", motion["state_id"]),
+            ) or {}
+            state = self.sql.get(
+                "motion_state",
+                motion["state_id"],
                 ["workflow_id"],
-            )
+            ) or {}
             if workflow_id != state.get("workflow_id"):
-                workflow = self.datastore.get(
-                    fqid_from_collection_and_id("motion_workflow", workflow_id),
+                workflow = self.sql.get(
+                    "motion_workflow",
+                    workflow_id,
                     ["first_state_id"],
-                )
+                ) or {}
                 instance["state_id"] = workflow["first_state_id"]
                 instance["recommendation_id"] = None
                 if "workflow_timestamp" not in instance:
@@ -169,8 +169,7 @@ class MotionUpdate(
             collection, id_ = collection_and_id_from_fqid(fqid)
             motion_ids.append(int(id_))
         if motion_ids:
-            gm_request = GetManyRequest("motion", motion_ids, ["id"])
-            gm_result = self.datastore.get_many([gm_request]).get("motion", {})
+            gm_result = self.sql.get_many("motion", motion_ids, ["id"])
             for motion_id in gm_result:
                 extension_reference_ids.append(
                     fqid_from_collection_and_id("motion", motion_id)
@@ -178,11 +177,12 @@ class MotionUpdate(
         instance[f"{prefix}_extension_reference_ids"] = extension_reference_ids
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        motion = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        motion = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["meeting_id", "state_id", "submitter_ids"],
             lock_result=False,
-        )
+        ) or {}
 
         # check for can_manage, all allowed
         perm = Permissions.Motion.CAN_MANAGE

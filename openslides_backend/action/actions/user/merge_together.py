@@ -8,7 +8,6 @@ from ....action.mixins.archived_meeting_check_mixin import CheckForArchivedMeeti
 from ....models.models import User
 from ....permissions.management_levels import OrganizationManagementLevel
 from ....permissions.permission_helper import has_organization_management_level
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, BadCodingException, MissingPermission
 from ....shared.filters import And, FilterOperator, Or
 from ....shared.patterns import Collection, CollectionField, fqid_from_collection_and_id
@@ -128,15 +127,11 @@ class UserMergeTogether(
         )
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        selected_users = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "user",
-                    [instance["id"], *instance["user_ids"]],
-                    ["organization_management_level"],
-                )
-            ]
-        )["user"]
+        selected_users = self.sql.get_many(
+            "user",
+            [instance["id"], *instance["user_ids"]],
+            ["organization_management_level"],
+        )
         all_omls = [
             OrganizationManagementLevel(oml)
             for user in selected_users.values()
@@ -177,7 +172,7 @@ class UserMergeTogether(
             for instance in action_data
             for user_id in instance.get("user_ids", [])
         }
-        polls = self.datastore.filter(
+        polls = self.sql.filter(
             "poll",
             And(
                 FilterOperator("entitled_users_at_stop", "!=", None),
@@ -289,7 +284,7 @@ class UserMergeTogether(
                 m_user["meeting_id"] for m_user in meeting_user_create_payloads
             ]
             if len(new_meeting_ids):
-                new_meeting_users = self.datastore.filter(
+                new_meeting_users = self.sql.filter(
                     "meeting_user",
                     And(
                         FilterOperator("user_id", "=", main_user_id),
@@ -326,7 +321,7 @@ class UserMergeTogether(
 
             meeting_user_id_by_meeting_id = {
                 model["meeting_id"]: id_
-                for id_, model in self.datastore.filter(
+                for id_, model in self.sql.filter(
                     "meeting_user",
                     FilterOperator("user_id", "=", main_user_id),
                     ["meeting_id"],
@@ -429,57 +424,37 @@ class UserMergeTogether(
                     )
                 )
             ):
-                get_many_requests = [
-                    GetManyRequest(
-                        "poll_candidate", pc_ids, ["poll_candidate_list_id"]
-                    ),
-                    GetManyRequest(
-                        "option",
-                        o_ids,
-                        ["poll_id"],
-                    ),
-                    GetManyRequest(
-                        "vote",
-                        v_ids,
-                        ["option_id"],
-                    ),
-                ]
-                many_models = self.datastore.get_many(get_many_requests)
+                poll_candidates = self.sql.get_many(
+                    "poll_candidate", pc_ids, ["poll_candidate_list_id"]
+                ) if pc_ids else {}
+                options = self.sql.get_many("option", o_ids, ["poll_id"]) if o_ids else {}
+                vote_data = self.sql.get_many("vote", v_ids, ["option_id"]) if v_ids else {}
+
                 if pc_ids:
                     candidate_list_ids_per_user_id[model["id"]] = {
                         poll_candidate["poll_candidate_list_id"]
-                        for poll_candidate in many_models["poll_candidate"].values()
+                        for poll_candidate in poll_candidates.values()
                         if poll_candidate.get("poll_candidate_list_id")
                     }
                 if o_ids:
                     option_poll_ids_per_user_id[model["id"]] = {
                         option["poll_id"]
-                        for option in many_models["option"].values()
+                        for option in options.values()
                         if option.get("poll_id")
                     }
-                vote_data = many_models["vote"]
+                vote_option_ids = list({
+                    vote["option_id"]
+                    for vote in vote_data.values()
+                    if vote.get("option_id")
+                })
+                vote_options = self.sql.get_many(
+                    "option", vote_option_ids, ["poll_id"]
+                ) if vote_option_ids else {}
                 vote_poll_ids_per_user_id[model["id"]] = {
                     *vote_poll_ids_per_user_id.get(model["id"], set()),
                     *{
                         cast(int, option["poll_id"])
-                        for option in self.datastore.get_many(
-                            [
-                                GetManyRequest(
-                                    "option",
-                                    list(
-                                        {
-                                            id_
-                                            for id_ in [
-                                                vote["option_id"]
-                                                for vote in vote_data.values()
-                                                if vote.get("option_id")
-                                            ]
-                                        }
-                                    ),
-                                    ["poll_id"],
-                                )
-                            ]
-                        )["option"].values()
+                        for option in vote_options.values()
                         if option.get("poll_id")
                     },
                 }
@@ -515,21 +490,16 @@ class UserMergeTogether(
                 f"multiple of the selected users are among the options in poll(s) {', '.join([str(id_) for id_ in option_conflicts])}"
             )
         if len(candidate_list_conflicts):
-            lists = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "poll_candidate_list",
-                        list(candidate_list_conflicts),
-                        ["option_id"],
-                    )
-                ],
+            lists = self.sql.get_many(
+                "poll_candidate_list",
+                list(candidate_list_conflicts),
+                ["option_id"],
                 lock_result=False,
-            )["poll_candidate_list"]
+            )
             option_ids = {c_list["option_id"] for c_list in lists.values()}
-            options = self.datastore.get_many(
-                [GetManyRequest("option", list(option_ids), ["poll_id"])],
-                lock_result=False,
-            )["option"]
+            options = self.sql.get_many(
+                "option", list(option_ids), ["poll_id"], lock_result=False
+            )
             poll_ids = {option["poll_id"] for option in options.values()}
             messages.append(
                 f"multiple of the selected users are in the same candidate list in poll(s) {', '.join([str(id_) for id_ in poll_ids])}"
@@ -611,7 +581,7 @@ class UserMergeTogether(
     def get_meeting_ids_per_user(
         self, users: list[PartialModel]
     ) -> dict[int, set[int]]:
-        meeting_users = self.datastore.filter(
+        meeting_users = self.sql.filter(
             "meeting_user",
             And(
                 FilterOperator("group_ids", "!=", []),

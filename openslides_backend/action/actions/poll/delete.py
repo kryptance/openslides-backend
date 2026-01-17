@@ -1,7 +1,6 @@
 from collections.abc import Callable
 
 from ....models.models import Poll
-from ....services.database.interface import GetManyRequest
 from ....shared.exceptions import VoteServiceException
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
@@ -21,29 +20,25 @@ class PollDelete(DeleteAction, PollPermissionMixin, PollHistoryMixin):
     poll_history_information = "deleted"
 
     def prefetch(self, action_data: ActionData) -> None:
-        result = self.datastore.get_many(
+        poll_ids = list({instance["id"] for instance in action_data})
+        poll_result = self.sql.get_many(
+            "poll", poll_ids,
             [
-                GetManyRequest(
-                    "poll",
-                    list({instance["id"] for instance in action_data}),
-                    [
-                        "content_object_id",
-                        "meeting_id",
-                        "entitled_group_ids",
-                        "voted_ids",
-                        "option_ids",
-                        "global_option_id",
-                        "projection_ids",
-                        "state",
-                    ],
-                ),
+                "content_object_id",
+                "meeting_id",
+                "entitled_group_ids",
+                "voted_ids",
+                "option_ids",
+                "global_option_id",
+                "projection_ids",
+                "state",
             ],
             use_changed_models=False,
-        )
-        polls = result["poll"].values()
+        ) if poll_ids else {}
+        polls = poll_result.values()
         self.started_polls = [
             id_
-            for id_, poll in result["poll"].items()
+            for id_, poll in poll_result.items()
             if poll.get("state") == "started"
         ]
         meeting_ids = list({poll["meeting_id"] for poll in polls})
@@ -60,20 +55,20 @@ class PollDelete(DeleteAction, PollPermissionMixin, PollHistoryMixin):
             if poll.get("option_ids")
             for option_id in poll["option_ids"]
         ]
-        requests = [
-            GetManyRequest(
-                "meeting",
-                meeting_ids,
+        if meeting_ids:
+            self.sql.get_many(
+                "meeting", meeting_ids,
                 [
                     "is_active_in_organization_id",
                     "name",
                     "option_ids",
                     "poll_ids",
                 ],
-            ),
-            GetManyRequest(
-                "option",
-                option_ids,
+                use_changed_models=False,
+            )
+        if option_ids:
+            self.sql.get_many(
+                "option", option_ids,
                 [
                     "meeting_id",
                     "vote_ids",
@@ -82,14 +77,14 @@ class PollDelete(DeleteAction, PollPermissionMixin, PollHistoryMixin):
                     "used_as_global_option_in_poll_id",
                     "vote_ids",
                 ],
-            ),
-            GetManyRequest(
-                "group",
-                group_ids,
+                use_changed_models=False,
+            )
+        if group_ids:
+            self.sql.get_many(
+                "group", group_ids,
                 ["poll_ids"],
-            ),
-        ]
-        self.datastore.get_many(requests, use_changed_models=False)
+                use_changed_models=False,
+            )
 
     def get_on_success(self, action_data: ActionData) -> Callable[[], None]:
         def on_success() -> None:

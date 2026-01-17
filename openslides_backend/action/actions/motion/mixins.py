@@ -5,7 +5,6 @@ from typing import Any
 import simplejson as json
 from psycopg.types.json import Jsonb
 
-from ....services.database.commands import GetManyRequest
 from ....services.database.interface import Database
 from ....shared.filters import And, FilterOperator
 from ....shared.html import get_text_from_html
@@ -18,27 +17,24 @@ class PermissionHelperMixin(Action):
     def is_allowed_and_submitter(self, submitter_ids: list[int], state_id: int) -> bool:
         if not submitter_ids:
             return False
-        state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", state_id),
+        state = self.sql.get(
+            "motion_state",
+            state_id,
             ["allow_submitter_edit"],
             lock_result=False,
-        )
+        ) or {}
         if not state.get("allow_submitter_edit"):
             return False
         return self.is_submitter(submitter_ids)
 
     def is_submitter(self, submitter_ids: list[int]) -> bool:
-        user = self.datastore.get(
-            fqid_from_collection_and_id("user", self.user_id), ["meeting_user_ids"]
-        )
-        get_many_request = GetManyRequest(
+        user = self.sql.get("user", self.user_id, ["meeting_user_ids"]) or {}
+        submitters = self.sql.get_many(
             "motion_submitter", submitter_ids, ["meeting_user_id"]
-        )
-        result = self.datastore.get_many([get_many_request])
-        submitters = result.get("motion_submitter", {}).values()
+        ) if submitter_ids else {}
         return any(
             s.get("meeting_user_id") in (user.get("meeting_user_ids") or [])
-            for s in submitters
+            for s in submitters.values()
         )
 
 
@@ -73,7 +69,7 @@ class TextHashMixin(Action):
                 FilterOperator("meeting_id", "=", self.get_meeting_id(instance)),
                 FilterOperator("lead_motion_id", "=", lead_motion_id),
             ]
-            result = self.datastore.filter(
+            result = self.sql.filter(
                 self.model.collection,
                 And(*filter),
                 ["id"],

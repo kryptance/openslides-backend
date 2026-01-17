@@ -11,7 +11,6 @@ from ....permissions.management_levels import (
 )
 from ....permissions.permission_helper import get_failing_committee_management_levels
 from ....shared.exceptions import ActionException, MissingPermission
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.util import ONE_ORGANIZATION_ID
 
 
@@ -25,10 +24,10 @@ class CommitteeCommonCreateUpdateMixin(
             "receive_forwardings_from_committee_ids",
         ]
         if id_:
-            committee = self.datastore.get(
-                fqid_from_collection_and_id("committee", id_),
+            committee = self.sql.get(
+                "committee", id_,
                 [*forwarding_fields, "manager_ids"],
-            )
+            ) or {}
         else:
             committee = {}
         field_difference: set[int] = set()

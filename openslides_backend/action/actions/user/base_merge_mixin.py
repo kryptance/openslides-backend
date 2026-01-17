@@ -3,7 +3,6 @@ from typing import Any, TypedDict, cast
 from openslides_backend.services.database.interface import PartialModel
 
 from ....models.base import Model
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.interfaces.event import EventType
 from ....shared.patterns import (
@@ -60,16 +59,14 @@ class BaseMergeMixin(Action):
     def mass_prefetch_for_merge(
         self, collection_to_ids: dict[Collection, list[int]]
     ) -> None:
-        data = self.datastore.get_many(
-            [
-                GetManyRequest(
+        data = {}
+        for collection, ids in collection_to_ids.items():
+            if ids:
+                data[collection] = self.sql.get_many(
                     collection,
                     ids,
                     self._all_collection_fields[collection],
                 )
-                for collection, ids in collection_to_ids.items()
-            ]
-        )
         mass_prefetch_payload: dict[Collection, list[int]] = {}
         for collection, collection_data in data.items():
             field_groups = self._collection_field_groups.get(collection, {})
@@ -367,15 +364,11 @@ class BaseMergeMixin(Action):
     def get_merge_by_rank_models(
         self, collection: Collection, ids: list[int]
     ) -> dict[int, PartialModel]:
-        result = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    collection,
-                    ids,
-                    ["id", *self._all_collection_fields[collection]],
-                )
-            ]
-        )[collection]
+        result = self.sql.get_many(
+            collection,
+            ids,
+            ["id", *self._all_collection_fields[collection]],
+        ) if ids else {}
         for date in result.values():
             date.pop("meta_position", None)
         return result

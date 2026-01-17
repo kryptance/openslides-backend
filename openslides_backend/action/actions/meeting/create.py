@@ -11,7 +11,7 @@ from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.patterns import fqid_from_collection_and_id, id_from_fqid
 from ....shared.schema import id_list_schema
-from ....shared.util import ONE_ORGANIZATION_FQID, ONE_ORGANIZATION_ID
+from ....shared.util import ONE_ORGANIZATION_ID
 from ...action import Action
 from ...mixins.create_action_with_dependencies import CreateActionWithDependencies
 from ...util.default_schema import DefaultSchema
@@ -80,14 +80,14 @@ class MeetingCreate(
         if instance.pop("set_as_template", None):
             instance["template_for_organization_id"] = ONE_ORGANIZATION_ID
 
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization", ONE_ORGANIZATION_ID,
             [
                 "limit_of_meetings",
                 "active_meeting_ids",
                 "require_duplicate_from",
             ],
-        )
+        ) or {}
         if (
             limit_of_meetings := organization.get("limit_of_meetings", 0)
         ) and limit_of_meetings == len(organization.get("active_meeting_ids", [])):

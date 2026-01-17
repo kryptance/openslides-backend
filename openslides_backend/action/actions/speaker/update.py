@@ -1,12 +1,10 @@
 from typing import Any
 
-from openslides_backend.services.database.commands import GetManyRequest
 from openslides_backend.shared.exceptions import ActionException
 
 from ....models.models import Speaker
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import optional_id_schema
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -52,8 +50,9 @@ class SpeakerUpdate(
             raise ActionException(
                 "You cannot set the speech state to interposed_question."
             )
-        speaker = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        speaker = self.sql.get(
+            self.model.collection,
+            instance["id"],
             [
                 "speech_state",
                 "point_of_order",
@@ -64,7 +63,7 @@ class SpeakerUpdate(
                 "structure_level_list_of_speakers_id",
                 "answer",
             ],
-        )
+        ) or {}
         if "speech_state" in instance:
             if (
                 (speaker.get("answer") and "answer" not in instance)
@@ -158,27 +157,21 @@ class SpeakerUpdate(
                 "Speaker can't be point of order and another speech state at the same time."
             )
 
-        requests = [
-            GetManyRequest(
-                "meeting",
-                [speaker["meeting_id"]],
-                [
-                    "list_of_speakers_enable_point_of_order_speakers",
-                    "list_of_speakers_can_create_point_of_order_for_others",
-                    "list_of_speakers_enable_point_of_order_categories",
-                ],
-            ),
-        ]
-        if meeting_user_id := speaker.get("meeting_user_id"):
-            requests.append(
-                GetManyRequest("meeting_user", [meeting_user_id], ["user_id"])
-            )
-        result = self.datastore.get_many(requests)
-        meeting = result["meeting"][speaker["meeting_id"]]
+        meeting = self.sql.get(
+            "meeting",
+            speaker["meeting_id"],
+            [
+                "list_of_speakers_enable_point_of_order_speakers",
+                "list_of_speakers_can_create_point_of_order_for_others",
+                "list_of_speakers_enable_point_of_order_categories",
+            ],
+        ) or {}
+        meeting_user_id = speaker.get("meeting_user_id")
         if meeting_user_id:
-            user_id = (
-                result.get("meeting_user", {}).get(meeting_user_id, {}).get("user_id")
-            )
+            meeting_user = self.sql.get(
+                "meeting_user", meeting_user_id, ["user_id"]
+            ) or {}
+            user_id = meeting_user.get("user_id")
         else:
             user_id = None
         self.check_point_of_order_fields(
@@ -192,17 +185,19 @@ class SpeakerUpdate(
         return instance
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        speaker = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        speaker = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["meeting_user_id", "meeting_id"],
             lock_result=False,
-        )
+        ) or {}
         if speaker.get("meeting_user_id"):
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id("meeting_user", speaker["meeting_user_id"]),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                speaker["meeting_user_id"],
                 ["user_id"],
                 lock_result=False,
-            )
+            ) or {}
             if meeting_user.get("user_id") == self.user_id and (
                 has_perm(
                     self.datastore,

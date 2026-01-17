@@ -2,10 +2,8 @@ from typing import Any
 
 from ....models.models import Projection, Projector
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...mixins.weight_mixin import WeightMixin
 from ...util.default_schema import DefaultSchema
@@ -26,33 +24,30 @@ class ProjectorProjectPreview(WeightMixin, UpdateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         projection_id = instance.pop("id")
-        projection = self.datastore.get(
-            fqid_from_collection_and_id("projection", projection_id),
-            ["preview_projector_id"],
-        )
+        projection = self.sql.get("projection", projection_id, ["preview_projector_id"]) or {}
         # check if projection is from a preview projector
         if not projection.get("preview_projector_id"):
             raise ActionException("Projection has not a preview_projector_id.")
         projector_id = projection["preview_projector_id"]
-        projector = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, projector_id),
+        projector = self.sql.get(
+            self.model.collection,
+            projector_id,
             [
                 "current_projection_ids",
                 "preview_projection_ids",
                 "history_projection_ids",
                 "meeting_id",
             ],
-        )
+        ) or {}
         # move current unstable projections to history
         current_projections = []
         if projector.get("current_projection_ids"):
-            gmr = GetManyRequest(
+            result = self.sql.get_many(
                 "projection",
                 projector["current_projection_ids"],
                 ["id", "stable"],
             )
-            result = self.datastore.get_many([gmr])
-            current_projections = list(result.get("projection", {}).values())
+            current_projections = list(result.values())
         new_current_projection_ids = [
             projection["id"]
             for projection in current_projections

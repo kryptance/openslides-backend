@@ -1,6 +1,6 @@
 from openslides_backend.models.models import Meeting
 
-from ....shared.patterns import fqid_from_collection_and_id
+from ....shared.filters import FilterOperator
 from ....shared.schema import required_id_schema
 from ...generics.update import UpdateAction
 from ...util.action_type import ActionType
@@ -27,10 +27,15 @@ class MeetingReplaceProjectorId(UpdateAction, GetMeetingIdFromIdMixin):
         for instance in payload:
             projector_id = instance.pop("projector_id")
             fields = Meeting.all_default_projectors()
-            fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
-            if self.datastore.is_to_be_deleted(fqid):
+            # Skip if meeting was deleted in this transaction
+            if not self.sql.exists(
+                self.model.collection, FilterOperator("id", "=", instance["id"])
+            ):
                 continue
-            meeting = self.datastore.get(fqid, fields + ["reference_projector_id"])
+            meeting = self.sql.get(
+                self.model.collection, instance["id"],
+                fields + ["reference_projector_id"]
+            ) or {}
             changed = False
             for field in fields:
                 change_list = meeting.get(field)

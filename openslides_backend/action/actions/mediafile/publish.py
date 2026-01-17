@@ -3,9 +3,8 @@ from typing import Any
 from ....action.mixins.archived_meeting_check_mixin import CheckForArchivedMeetingMixin
 from ....models.models import Mediafile
 from ....permissions.management_levels import OrganizationManagementLevel
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import KEYSEPARATOR, fqid_from_collection_and_id
+from ....shared.patterns import KEYSEPARATOR
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -32,8 +31,8 @@ class MediafilePublish(UpdateAction, CheckForArchivedMeetingMixin):
         relation_key = "published_to_meetings_in_organization_id"
         for instance in action_data:
             publish = instance.pop("publish", False)
-            mediafile = self.datastore.get(
-                fqid_from_collection_and_id("mediafile", instance["id"]),
+            mediafile = self.sql.get(
+                "mediafile", instance["id"],
                 [
                     "owner_id",
                     "child_ids",
@@ -41,7 +40,7 @@ class MediafilePublish(UpdateAction, CheckForArchivedMeetingMixin):
                     relation_key,
                     "meeting_mediafile_ids",
                 ],
-            )
+            ) or {}
             collection, _ = str(mediafile["owner_id"]).split(KEYSEPARATOR)
             if collection != "organization":
                 raise ActionException(
@@ -66,19 +65,15 @@ class MediafilePublish(UpdateAction, CheckForArchivedMeetingMixin):
         )
         yield instance
         if len(child_ids):
-            children = self.datastore.get_many(
+            children = self.sql.get_many(
+                "mediafile",
+                child_ids,
                 [
-                    GetManyRequest(
-                        "mediafile",
-                        child_ids,
-                        [
-                            "child_ids",
-                            "published_to_meetings_in_organization_id",
-                            "meeting_mediafile_ids",
-                        ],
-                    )
-                ]
-            )["mediafile"]
+                    "child_ids",
+                    "published_to_meetings_in_organization_id",
+                    "meeting_mediafile_ids",
+                ],
+            ) if child_ids else {}
             for id_, child in children.items():
                 yield from self.get_publish_instances(
                     {

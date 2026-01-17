@@ -5,7 +5,6 @@ from typing import Any
 from openslides_backend.action.mixins.extend_history_mixin import ExtendHistoryMixin
 from openslides_backend.shared.interfaces.event import Event, EventType
 
-from ....services.database.interface import GetManyRequest
 from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.typing import HistoryInformation
 from ...action import Action
@@ -16,13 +15,12 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
 
     def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
         yield from super().create_events(instance)
-        db_instance = self.datastore.get(
-            fqid_from_collection_and_id("meeting_user", instance["id"]),
+        db_instance = self.sql.get(
+            "meeting_user",
+            instance["id"],
             ["vote_delegated_to_id", "vote_delegations_from_ids"],
-            use_changed_models=False,
-            raise_exception=False,
             lock_result=False,
-        )
+        ) or {}
         meeting_user_ids = set(instance.get("vote_delegations_from_ids", []))
         if "vote_delegations_from_ids" in instance:
             added_delegations = list(
@@ -34,17 +32,12 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
             if added_delegations:
                 db_added_to_ids = [
                     date["vote_delegated_to_id"]
-                    for date in self.datastore.get_many(
-                        [
-                            GetManyRequest(
-                                "meeting_user",
-                                added_delegations,
-                                ["vote_delegated_to_id"],
-                            )
-                        ],
-                        use_changed_models=False,
+                    for date in self.sql.get_many(
+                        "meeting_user",
+                        added_delegations,
+                        ["vote_delegated_to_id"],
                         lock_result=False,
-                    )["meeting_user"].values()
+                    ).values()
                     if date.get("vote_delegated_to_id")
                 ]
                 meeting_user_ids.update(db_added_to_ids)
@@ -57,16 +50,9 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
         if meeting_user_ids:
             user_ids: set[int] = {
                 muser["user_id"]
-                for muser in self.datastore.get_many(
-                    [
-                        GetManyRequest(
-                            "meeting_user", list(meeting_user_ids), ["user_id"]
-                        )
-                    ],
-                    lock_result=False,
-                )
-                .get("meeting_user", {})
-                .values()
+                for muser in self.sql.get_many(
+                    "meeting_user", list(meeting_user_ids), ["user_id"], lock_result=False
+                ).values()
             }
             for user_id in user_ids:
                 yield self.build_event(
@@ -82,13 +68,12 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
         # Copy instances first since they are modified
         for instance in deepcopy(self.instances):
             # Fetch the current instance from the db to diff with the given instance
-            db_instance = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            db_instance = self.sql.get(
+                self.model.collection,
+                instance["id"],
                 list(instance.keys()) + ["user_id", "meeting_id"],
-                use_changed_models=False,
-                raise_exception=False,
                 lock_result=False,
-            )
+            ) or {}
             if not db_instance:
                 self.add_created_meeting_user_history_information(instance, information)
             else:
@@ -140,11 +125,12 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
     def add_created_meeting_user_history_information(
         self, instance: dict[str, Any], information: dict[str, list[tuple[str, ...]]]
     ) -> None:
-        db_instance = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        db_instance = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["user_id", "meeting_id"],
             lock_result=False,
-        )
+        ) or {}
         instance_information: list[tuple[str, ...]] = []
         fqids_per_collection = {
             collection_name: [
@@ -188,11 +174,10 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
         if not for_user_id:
             if not for_meeting_user_id:
                 raise Exception("Can't add history entry without a target user id.")
-            user_id = self.datastore.get(
-                fqid_from_collection_and_id("meeting_user", for_meeting_user_id),
-                ["user_id"],
-                lock_result=False,
-            )["user_id"]
+            meeting_user = self.sql.get(
+                "meeting_user", for_meeting_user_id, ["user_id"], lock_result=False
+            ) or {}
+            user_id = meeting_user["user_id"]
         else:
             user_id = for_user_id
         fqid = fqid_from_collection_and_id("user", user_id)
@@ -243,11 +228,9 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
             removed = db_group_ids - instance_group_ids
 
             # remove default groups
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", meeting_id),
-                ["default_group_id"],
-                lock_result=False,
-            )
+            meeting = self.sql.get(
+                "meeting", meeting_id, ["default_group_id"], lock_result=False
+            ) or {}
             added.discard(meeting.get("default_group_id"))
             removed.discard(meeting.get("default_group_id"))
             changed = added | removed
@@ -288,12 +271,10 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
                 (old_to_muser_id := db_instance.get("vote_delegated_to_id"))
                 and old_to_muser_id != instance["vote_delegated_to_id"]
                 and (
-                    old_to_user_id := self.datastore.get(
-                        fqid_from_collection_and_id("meeting_user", old_to_muser_id),
-                        ["user_id"],
-                        use_changed_models=False,
-                        raise_exception=False,
-                        lock_result=False,
+                    old_to_user_id := (
+                        self.sql.get(
+                            "meeting_user", old_to_muser_id, ["user_id"], lock_result=False
+                        ) or {}
                     ).get("user_id")
                 )
             ):
@@ -315,14 +296,13 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
                     for_user_id=old_to_user_id,
                 )
             if instance["vote_delegated_to_id"]:
-                to_user_id = self.datastore.get(
-                    fqid_from_collection_and_id(
-                        "meeting_user", instance["vote_delegated_to_id"]
-                    ),
+                to_meeting_user = self.sql.get(
+                    "meeting_user",
+                    instance["vote_delegated_to_id"],
                     ["user_id"],
-                    use_changed_models=True,
                     lock_result=False,
-                )["user_id"]
+                ) or {}
+                to_user_id = to_meeting_user["user_id"]
                 instance_information.append(
                     (
                         "Vote delegated to {} in meeting {}",
@@ -349,9 +329,9 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
             if removed:
                 removed_user_ids = [
                     str(m_user["user_id"])
-                    for m_user in self.datastore.get_many(
-                        [GetManyRequest("meeting_user", list(removed), ["user_id"])]
-                    )["meeting_user"].values()
+                    for m_user in self.sql.get_many(
+                        "meeting_user", list(removed), ["user_id"]
+                    ).values()
                 ]
                 insertion_string = ", ".join(["{}" for i in removed_user_ids])
                 instance_information.append(
@@ -380,17 +360,12 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
             if added:
                 db_added = [
                     date
-                    for date in self.datastore.get_many(
-                        [
-                            GetManyRequest(
-                                "meeting_user",
-                                list(added),
-                                ["vote_delegated_to_id", "user_id"],
-                            )
-                        ],
-                        use_changed_models=False,
+                    for date in self.sql.get_many(
+                        "meeting_user",
+                        list(added),
+                        ["vote_delegated_to_id", "user_id"],
                         lock_result=False,
-                    )["meeting_user"].values()
+                    ).values()
                     if date.get("vote_delegated_to_id")
                 ]
                 for date in db_added:
@@ -417,9 +392,9 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
                     )
                 added_user_ids = [
                     str(m_user["user_id"])
-                    for m_user in self.datastore.get_many(
-                        [GetManyRequest("meeting_user", list(added), ["user_id"])]
-                    )["meeting_user"].values()
+                    for m_user in self.sql.get_many(
+                        "meeting_user", list(added), ["user_id"]
+                    ).values()
                 ]
                 insertion_string = ", ".join(["{}" for i in added_user_ids])
                 instance_information.append(

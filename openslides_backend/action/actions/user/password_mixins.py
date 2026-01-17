@@ -1,8 +1,6 @@
 from collections.abc import Callable
 from typing import Any
 
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
-
 from ....shared.exceptions import ActionException
 from ...action import Action
 from ...util.typing import ActionData
@@ -19,11 +17,11 @@ class SetPasswordMixin(Action):
         the default password if `set_as_default` is True in the instance.
         """
         if "meta_new" not in instance:
-            user = self.datastore.get(
-                fqid_from_collection_and_id("user", instance["id"]),
+            user = self.sql.get(
+                "user", instance["id"],
                 ["saml_id"],
                 lock_result=False,
-            )
+            ) or {}
         else:
             user = instance
         if user.get("saml_id"):

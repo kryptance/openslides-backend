@@ -7,7 +7,6 @@ from openslides_backend.shared.typing import HistoryInformation
 from ....models.models import Motion
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -28,17 +27,19 @@ class MotionSetRecommendationAction(UpdateAction, MotionStateHistoryInformationM
         """
         Check recommendation workflow_id and recommendation_label.
         """
-        motion = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["id"]), ["state_id"]
-        )
-        current_state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", motion["state_id"]),
+        motion = self.sql.get(
+            "motion", instance["id"], ["state_id"]
+        ) or {}
+        current_state = self.sql.get(
+            "motion_state",
+            motion["state_id"],
             ["workflow_id"],
-        )
-        recommendation_state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", instance["recommendation_id"]),
+        ) or {}
+        recommendation_state = self.sql.get(
+            "motion_state",
+            instance["recommendation_id"],
             ["workflow_id", "recommendation_label"],
-        )
+        ) or {}
         if current_state.get("workflow_id") != recommendation_state.get("workflow_id"):
             raise ActionException(
                 "Cannot set recommendation. State is from a different workflow as motion."
