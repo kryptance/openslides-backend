@@ -12,6 +12,7 @@ from psycopg import Connection, rows, sql
 from psycopg.errors import (
     CheckViolation,
     DatatypeMismatch,
+    ForeignKeyViolation,
     GeneratedAlways,
     InFailedSqlTransaction,
     NotNullViolation,
@@ -827,6 +828,26 @@ class SqlHelper(SqlQueryHelper):
             raise InvalidFormat(
                 f"Check constraint violation for {error_fqid}: {e}"
             )
+        except ForeignKeyViolation as e:
+            # Parse FK violation to extract the missing model
+            # Error format: "Key (column)=(value) is not present in table "table_t"."
+            import re
+
+            error_msg = str(e)
+            # Try to extract the referenced model info
+            match = re.search(
+                r'Key \((\w+)\)=\((\d+)\) is not present in table "(\w+)_t"',
+                error_msg,
+            )
+            if match:
+                _column, ref_id, ref_collection = match.groups()
+                missing_fqid = f"{ref_collection}/{ref_id}"
+                raise ModelDoesNotExist(missing_fqid)
+            else:
+                # Fallback: raise a generic error
+                raise RelationException(
+                    f"Foreign key constraint violation for {error_fqid}: {e}"
+                )
 
     # =========================================================================
     # UTILITY METHODS

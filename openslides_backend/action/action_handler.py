@@ -3,8 +3,10 @@ from copy import deepcopy
 from http import HTTPStatus
 from typing import Any, TypeVar, cast
 
+import re
+
 import fastjsonschema
-from psycopg.errors import RaiseException
+from psycopg.errors import ForeignKeyViolation, RaiseException
 
 from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
@@ -14,6 +16,7 @@ from openslides_backend.services.postgresql.db_connection_handling import (
 from ..shared.exceptions import (
     ActionException,
     DatastoreLockedException,
+    ModelDoesNotExist,
     RelationException,
     View400Exception,
 )
@@ -152,6 +155,22 @@ class ActionHandler(BaseHandler):
             except RaiseException as e:
                 # This is raised at the end of transaction as the constraint trigger has to be initially deferred.
                 raise RelationException(f"Relation violates required constraint: {e}")
+            except ForeignKeyViolation as e:
+                # FK constraint violations occur at COMMIT time for deferred constraints.
+                # Parse the error to extract the missing model fqid.
+                error_msg = str(e)
+                match = re.search(
+                    r'Key \((\w+)\)=\((\d+)\) is not present in table "(\w+)_t"',
+                    error_msg,
+                )
+                if match:
+                    _column, ref_id, ref_collection = match.groups()
+                    missing_fqid = f"{ref_collection}/{ref_id}"
+                    raise ModelDoesNotExist(missing_fqid)
+                else:
+                    raise RelationException(
+                        f"Foreign key constraint violation: {e}"
+                    )
 
     def execute_internal_action(self, action: str, data: dict[str, Any]) -> None:
         """Helper function to execute an internal action with user id -1."""
