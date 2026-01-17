@@ -132,17 +132,17 @@ class DatabaseWriter(SqlQueryHelper):
     def get_request_name(self, event: WriteRequest) -> str:
         return type(event).__name__.replace("Request", "").replace("Event", "").upper()
 
-    # Collections that are ONLY written via events (not via direct SQL in actions)
-    # Main model writes happen directly via SqlHelper in action classes.
-    # History records are still created through the event system.
-    EVENT_ONLY_COLLECTIONS = {"history_position", "history_entry"}
-
     def write_events(
         self,
         events: list[Event],
     ) -> list[FullQualifiedId]:
+        """
+        Process events and write them to the database.
+
+        Note: Most model writes now happen directly via SqlHelper in action classes.
+        Events are primarily used for migrations and special cases.
+        """
         if not events:
-            # Events can be empty if all main model writes were done directly via SqlHelper
             return []
 
         models_created_or_updated = set()
@@ -163,11 +163,6 @@ class DatabaseWriter(SqlQueryHelper):
             else:
                 collection = event["collection"]
                 id_ = None
-
-            # Skip non-history collections - they are written directly via SqlHelper
-            # in the action classes. Only history records go through the event system.
-            if collection not in self.EVENT_ONLY_COLLECTIONS:
-                continue
 
             match event["type"]:
                 case EventType.Create:

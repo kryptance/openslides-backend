@@ -1,9 +1,9 @@
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
 import fastjsonschema
 from psycopg.types.json import Jsonb
@@ -20,7 +20,6 @@ from ..permissions.management_levels import (
 from ..permissions.permission_helper import has_organization_management_level, has_perm
 from ..permissions.permissions import Permission
 from ..presenter.base import BasePresenter
-from ..services.database.commands import GetManyRequest
 from ..services.database.interface import Database
 from ..services.database.sql_helper import SqlHelper
 from ..shared.exceptions import (
@@ -28,11 +27,9 @@ from ..shared.exceptions import (
     AnonymousNotAllowed,
     MissingPermission,
     PermissionDenied,
-    RequiredFieldsException,
 )
 from ..shared.history_events import calculate_history_event_payloads
 from ..shared.interfaces.env import Env
-from ..shared.interfaces.event import Event, EventType, ListFields
 from ..shared.interfaces.logging import LoggingModule
 from ..shared.interfaces.services import Services
 from ..shared.interfaces.write_request import WriteRequest
@@ -45,7 +42,7 @@ from ..shared.patterns import (
     id_from_fqid,
     transform_to_fqids,
 )
-from ..shared.typing import DeletedModel, HistoryInformation
+from ..shared.typing import HistoryInformation
 from .relations.relation_manager import RelationManager, RelationUpdates
 from .relations.typing import FieldUpdateElement, ListUpdateElement
 from .util.action_type import ActionType
@@ -111,10 +108,14 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
 
     action_data: ActionData
     instances: list[dict[str, Any]]
-    events: list[Event]
     results: ActionResults
     cascaded_actions_history: HistoryInformation
     internal: bool
+
+    # Track which models are created/updated/deleted for history
+    created_fqids: set[str]
+    updated_fqids: set[str]
+    deleted_fqids: set[str]
 
     def __init__(
         self,
@@ -142,9 +143,12 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             self.sql = sql
         else:
             self.sql = SqlHelper(self.datastore.connection, logging, env)
-        self.events = []
         self.results = []
         self.cascaded_actions_history = {}
+        # Initialize tracking sets for history
+        self.created_fqids = set()
+        self.updated_fqids = set()
+        self.deleted_fqids = set()
 
     def perform(
         self,
@@ -194,17 +198,18 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
 
             instance = self.base_update_instance(instance)
 
-            relation_updates = self.handle_relation_updates(instance)
-            self.events.extend(relation_updates)
+            # Handle relation updates (writes directly to DB, tracks updated fqids)
+            self.handle_relation_updates(instance)
 
-            events = self.create_events(instance)
-            self.events.extend(events)
+            # Perform the main write operation (implemented in generic actions)
+            self.write_instance(instance)
 
             if is_original_instances:
                 result = self.create_action_result_element(instance)
                 self.results.append(result)
 
-        write_request = self.build_write_request()
+        # Write history directly to database
+        write_request = self.write_history()
         # by default, for actions which changed the updated instances, just return None
         if not is_original_instances and not self.results:
             return (write_request, None)
@@ -356,62 +361,40 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
     def handle_relation_updates(
         self,
         instance: dict[str, Any],
-    ) -> Iterable[Event]:
+    ) -> None:
         """
-        Creates write request elements (with update events) for all relations.
+        Handles relation updates by writing directly to DB and tracking updated fqids.
         """
         relation_updates = self.relation_manager.get_relation_updates(
             self.model, instance, self.name
         )
-        return self.handle_relation_updates_helper(relation_updates)
+        self.handle_relation_updates_helper(relation_updates)
 
     def handle_relation_updates_helper(
         self,
         relation_updates: RelationUpdates,
-    ) -> Iterable[Event]:
+    ) -> None:
         for fqfield, data in relation_updates.items():
-            fields: dict[str, Any] = {}
-            list_fields: ListFields = {}
             fqid, field = fqid_and_field_from_fqfield(fqfield)
+            collection = collection_from_fqid(fqid)
+            id_ = id_from_fqid(fqid)
+
             if data["type"] in ("add", "remove"):
                 data = cast(FieldUpdateElement, data)
-                fields[field] = data["value"]
+                self.sql.update(collection, id_, {field: data["value"]})
             elif data["type"] == "list_update":
                 data = cast(ListUpdateElement, data)
                 if data["add"]:
-                    list_fields["add"] = {field: data["add"]}
+                    self.sql.add_to_list(collection, id_, field, data["add"])
                 if data["remove"]:
-                    list_fields["remove"] = {field: data["remove"]}
-            yield self.build_event(
-                EventType.Update,
-                fqid,
-                fields,
-                list_fields,
-            )
+                    self.sql.remove_from_list(collection, id_, field, data["remove"])
 
-    def build_event(
-        self,
-        type: EventType,
-        fqid: FullQualifiedId,
-        fields: dict[str, Any] | None = None,
-        list_fields: ListFields | None = None,
-    ) -> Event:
-        """
-        Helper function to create a WriteRequest.
-        """
-        event = Event(
-            type=type,
-            fqid=fqid,
-        )
-        if fields:
-            event["fields"] = fields
-        if list_fields:
-            event["list_fields"] = list_fields
-        return event
+            # Track this fqid as updated for history
+            self.updated_fqids.add(fqid)
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+    def write_instance(self, instance: dict[str, Any]) -> None:
         """
-        Creates events for one instance of the current model. To be overriden in subclasses.
+        Writes one instance to the database. To be overridden in subclasses (CreateAction, UpdateAction, DeleteAction).
         """
         raise NotImplementedError()
 
@@ -424,99 +407,85 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         """
         return None
 
-    def build_write_request(
-        self,
-    ) -> WriteRequest | None:
+    def write_history(self) -> WriteRequest | None:
         """
-        Merge all created events to one single write request which is returned by this action.
+        Writes history records directly to the database.
+        Returns a WriteRequest with history information for sub-calls, or None.
         """
-        return self._build_write_request(WriteRequest([]))
+        information = self.get_full_history_information()
 
-    def _build_write_request(
-        self,
-        write_request: T,
-    ) -> T | None:
-        # merge all events, if any, into a write request
-        if self.events:
-            # sort events: create - update - delete
-            events_by_type: dict[EventType, list[Event]] = defaultdict(list)
-            for event in self.events:
-                self.apply_event(event)
-                events_by_type[event["type"]].append(event)
-            information = self.get_full_history_information()
-            if self.is_sub_call:
-                write_request.information = information
-            elif information:
-                information = {
-                    fqid: info
-                    for fqid, info in information.items()
-                    if fqid.split("/")[0] in HISTORY_MODELS
-                }
-                if len(information):
-                    position_id = self.sql.reserve_id("history_position")
-                    entry_ids = self.sql.reserve_ids(
-                        "history_entry", len(information)
-                    )
-                    deleted_fqids: set[str] = {
-                        event["fqid"] for event in events_by_type[EventType.Delete]
-                    }
-                    touched_fqids: set[str] = {
-                        event["fqid"]
-                        for event in [
-                            *events_by_type[EventType.Create],
-                            *events_by_type[EventType.Update],
-                        ]
-                    }
-                    if self.user_id and self.user_id > 0:
-                        touched_fqids.add(
-                            fqid_from_collection_and_id("user", self.user_id)
-                        )
-                    collection_to_ids: dict[str, list[int]] = defaultdict(list)
-                    for fqid in information:
-                        collection_to_ids[collection_from_fqid(fqid)].append(
-                            id_from_fqid(fqid)
-                        )
-                    # Gather meeting_ids from all collections that have meeting_id field
-                    data: dict[str, dict[int, dict[str, Any]]] = {}
-                    for collection, ids in collection_to_ids.items():
-                        if model_registry[collection]().try_get_field("meeting_id"):
-                            data[collection] = self.sql.get_many(
-                                collection, ids, ["meeting_id"]
-                            ) if ids else {}
-                    create_events = calculate_history_event_payloads(
-                        self.user_id,
-                        information,
-                        position_id,
-                        {m_fqid: e_id for m_fqid, e_id in zip(information, entry_ids)},
-                        {
-                            fqid_from_collection_and_id(collection, id_): meeting_id
-                            for collection, models in data.items()
-                            for id_, date in models.items()
-                            if (meeting_id := date.get("meeting_id"))
-                            and not any(
-                                f"meeting/{meeting_id}" == event["fqid"]
-                                for event in events_by_type[EventType.Delete]
-                            )
-                        },
-                        touched_fqids - deleted_fqids,
-                    )
-                    events_by_type[EventType.Create].extend(
-                        [
-                            Event(
-                                type=EventType.Create,
-                                fqid=fqid,
-                                fields=cast(dict[str, Any], fields),
-                            )
-                            for fqid, fields in create_events
-                        ]
-                    )
+        if self.is_sub_call:
+            # For sub-calls, return WriteRequest with information for parent to merge
+            write_request = WriteRequest([])
+            write_request.information = information
             write_request.user_id = self.user_id
-            write_request.events.extend(events_by_type[EventType.Create])
-            write_request.events.extend(
-                self.merge_update_events(events_by_type[EventType.Update])
-            )
-            write_request.events.extend(events_by_type[EventType.Delete])
             return write_request
+
+        if not information:
+            return None
+
+        # Filter to only include history-tracked models
+        information = {
+            fqid: info
+            for fqid, info in information.items()
+            if fqid.split("/")[0] in HISTORY_MODELS
+        }
+
+        if not information:
+            return None
+
+        # Reserve IDs for history records
+        position_id = self.sql.reserve_id("history_position")
+        entry_ids = self.sql.reserve_ids("history_entry", len(information))
+
+        # Build touched_fqids from tracking sets
+        touched_fqids = self.created_fqids | self.updated_fqids
+        if self.user_id and self.user_id > 0:
+            touched_fqids.add(fqid_from_collection_and_id("user", self.user_id))
+
+        # Gather meeting_ids for history entries
+        collection_to_ids: dict[str, list[int]] = defaultdict(list)
+        for fqid in information:
+            collection_to_ids[collection_from_fqid(fqid)].append(id_from_fqid(fqid))
+
+        data: dict[str, dict[int, dict[str, Any]]] = {}
+        for collection, ids in collection_to_ids.items():
+            if model_registry[collection]().try_get_field("meeting_id"):
+                data[collection] = self.sql.get_many(collection, ids, ["meeting_id"]) if ids else {}
+
+        # Check which meetings are being deleted
+        deleted_meeting_ids = {
+            id_from_fqid(fqid)
+            for fqid in self.deleted_fqids
+            if fqid.startswith("meeting/")
+        }
+
+        # Build model_fqid_to_meeting_id mapping
+        model_fqid_to_meeting_id = {
+            fqid_from_collection_and_id(collection, id_): meeting_id
+            for collection, models in data.items()
+            for id_, date in models.items()
+            if (meeting_id := date.get("meeting_id"))
+            and meeting_id not in deleted_meeting_ids
+        }
+
+        # Calculate history payloads
+        existing_fqids = touched_fqids - self.deleted_fqids
+        history_data = calculate_history_event_payloads(
+            self.user_id,
+            information,
+            position_id,
+            {m_fqid: e_id for m_fqid, e_id in zip(information, entry_ids)},
+            model_fqid_to_meeting_id,
+            existing_fqids,
+        )
+
+        # Write history records directly to database
+        for fqid, fields in history_data:
+            collection = collection_from_fqid(fqid)
+            id_ = id_from_fqid(fqid)
+            self.sql.insert(collection, fields, id_)
+
         return None
 
     def get_full_history_information(self) -> HistoryInformation | None:
@@ -588,95 +557,6 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         instances = self.get_instances_with_fields([field], [instance])
         return instances[0].get(field) if instances else None
 
-    def merge_update_events(self, update_events: list[Event]) -> list[Event]:
-        """
-        This is optimation to reduce the amount of update events.
-        """
-        events_by_fqid = defaultdict(list)
-        for event in update_events:
-            events_by_fqid[event["fqid"]].append(event)
-
-        result: list[Event] = []
-        for fqid in events_by_fqid:
-            result.extend(self.merge_update_events_for_fqid(events_by_fqid[fqid]))
-
-        return result
-
-    def merge_update_events_for_fqid(self, events: list[Event]) -> list[Event]:
-        result: list[Event] = []
-        trailing_index: int | None = None
-        count = 0
-        for event in events[::-1]:
-            if not event.get("list_fields"):
-                if trailing_index is None:
-                    trailing_index = count + 1
-                    result.insert(0, event)
-                else:
-                    new_fields_dict = event.get("fields") or {}
-                    new_fields_dict.update(result[-trailing_index]["fields"] or {})
-                    result[-trailing_index]["fields"] = new_fields_dict
-            else:
-                count += 1
-                result.insert(0, event)
-
-        return result
-
-    def apply_event(self, event: Event) -> None:
-        """
-        No-op: With direct SQL access, events are applied directly to the database
-        in the respective action classes. This method is kept for compatibility
-        with the event-based write request building.
-        """
-        pass
-
-    def validate_write_request(self, write_request: WriteRequest) -> None:
-        """
-        Validate required fields with the events of one WriteRequest.
-        Precondition: Events are sorted create/update/delete-events
-        Not implemented: required RelationListFields of all types raise a NotImplementedError, if there exist
-        one, during getting required_fields from model.
-        Also check for fields in the write request, which are not model fields.
-        """
-        fdict: dict[FullQualifiedId, dict[str, Any]] = {}
-        for event in write_request.events:
-            if fdict.get(event["fqid"]):
-                if event["type"] == EventType.Delete:
-                    fdict[event["fqid"]]["type"] = EventType.Delete
-                else:
-                    fdict[event["fqid"]]["fields"].update(event.get("fields", {}))
-            else:
-                fdict[event["fqid"]] = {
-                    "type": event["type"],
-                    "fields": event.get("fields", {}),
-                }
-
-        for fqid, v in fdict.items():
-            fqid_model: Model = model_registry[collection_from_fqid(fqid)]()
-            type_ = v["type"]
-            instance = v["fields"]
-            if type_ in (EventType.Create, EventType.Update):
-                is_create = type_ == EventType.Create
-                required_fields = [
-                    field.own_field_name
-                    for field in fqid_model.get_required_fields()
-                    if field.check_required_not_fulfilled(instance, is_create)
-                ]
-                if required_fields:
-                    fqid_str = (
-                        f"Creation of {fqid}" if is_create else f"Update of {fqid}"
-                    )
-                    raise RequiredFieldsException(fqid_str, required_fields)
-
-            # check all fields in the write request
-            for field_name, value in instance.items():
-                if fqid_model.has_field(field_name):
-                    fqid_model.get_field(field_name).validate_with_schema(
-                        fqid, field_name, value
-                    )
-                else:
-                    raise ActionException(
-                        f"{field_name} is not a valid field for model {fqid_model.collection}."
-                    )
 
     def validate_fields(self, instance: dict[str, Any]) -> dict[str, Any]:
         """
@@ -765,8 +645,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         Executes the given action class as a dependent action with the given action
         data and the given addtional relation models. Merges its own additional
         relation models into it.
-        The action is fully executed and created WriteRequests are appended to
-        this action.
+        The action is fully executed and tracking sets are merged into this action.
         The attribute skip_archived_meeting_check from the calling class is inherited
         to the called class if set. Usually this is needed for cascading deletes from
         outside of meeting.
@@ -787,12 +666,17 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             write_request, action_results = action.perform(
                 action_data, self.user_id, internal=True, is_sub_call=True
             )
-            if write_request:
-                self.events.extend(write_request.events)
-                if not skip_history and write_request.information:
-                    merge_history_informations(
-                        self.cascaded_actions_history, write_request.information
-                    )
+
+            # Merge tracking sets from sub-action
+            self.created_fqids.update(action.created_fqids)
+            self.updated_fqids.update(action.updated_fqids)
+            self.deleted_fqids.update(action.deleted_fqids)
+
+            # Merge history information
+            if write_request and not skip_history and write_request.information:
+                merge_history_informations(
+                    self.cascaded_actions_history, write_request.information
+                )
             return action_results
 
     def get_on_success(self, action_data: ActionData) -> Callable[[], None] | None:

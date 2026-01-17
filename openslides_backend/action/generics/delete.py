@@ -1,9 +1,7 @@
-from collections.abc import Iterable
 from typing import Any, ClassVar, cast
 
 from ...models.fields import BaseRelationField, OnDelete
 from ...shared.exceptions import ActionException, ProtectedModelsException
-from ...shared.interfaces.event import Event, EventType
 from ...shared.patterns import (
     FullQualifiedId,
     collection_from_fqid,
@@ -118,20 +116,18 @@ class DeleteAction(Action):
 
         return instance
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+    def write_instance(self, instance: dict[str, Any]) -> None:
         """
-        Creates delete events for one instance of the current model.
-
-        If use_direct_sql is True, this also deletes directly from the database.
-        Events are still generated for history tracking and backward compatibility.
+        Deletes one instance from the database via direct SQL DELETE.
+        Tracks the fqid for history.
         """
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
 
-        # Direct SQL delete if enabled
-        if self.use_direct_sql:
-            self.sql.delete(self.model.collection, instance["id"])
+        # Direct SQL DELETE
+        self.sql.delete(self.model.collection, instance["id"])
 
-        yield self.build_event(EventType.Delete, fqid)
+        # Track for history
+        self.deleted_fqids.add(fqid)
 
     def is_meeting_to_be_deleted(self, meeting_id: int) -> bool:
         """

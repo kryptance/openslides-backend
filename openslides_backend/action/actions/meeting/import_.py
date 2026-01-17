@@ -1,6 +1,5 @@
 import re
 from collections import defaultdict
-from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
@@ -24,7 +23,6 @@ from openslides_backend.permissions.permission_helper import (
 )
 from openslides_backend.shared.exceptions import ActionException, MissingPermission
 from openslides_backend.shared.filters import FilterOperator, Or
-from openslides_backend.shared.interfaces.event import EventType
 from openslides_backend.shared.interfaces.write_request import WriteRequest
 from openslides_backend.shared.patterns import (
     KEYSEPARATOR,
@@ -106,8 +104,10 @@ class MeetingImport(
             raise e
         instance = self.base_update_instance(instance)
         self.check_unique(next(iter(instance["meeting"]["meeting"].values())))
-        self.events.extend(self.create_events(instance))
-        write_request = self.build_write_request()
+        # Write all data directly via SQL
+        self.write_all_meeting_data(instance)
+        # Write history
+        write_request = self.write_history()
         result = [self.create_action_result_element(instance)]
         return (write_request, result)
 
@@ -613,16 +613,18 @@ class MeetingImport(
             replaced_id = self.replace_map["mediafile"][id_]
             self.media.upload_mediafile(blob, replaced_id, mimetype)
 
-    def create_events(
-        self, instance: dict[str, Any], pure_create_events: bool = False
-    ) -> Iterable[Event]:
-        """Be careful, this method is also used by meeting.clone!"""
+    def write_all_meeting_data(
+        self, instance: dict[str, Any], pure_create_only: bool = False
+    ) -> None:
+        """
+        Write all meeting data directly via SQL.
+        Be careful, this method is also used by meeting.clone!
+        """
         json_data = instance["meeting"]
         meeting = self.get_meeting_from_json(json_data)
         meeting_id = meeting["id"]
-        events = []
-        update_events = []
         add_genders_to_organisation = []
+
         for collection in json_data:
             for entry in json_data[collection].values():
                 fqid = fqid_from_collection_and_id(collection, entry["id"])
@@ -630,80 +632,49 @@ class MeetingImport(
                 if meta_new:
                     if collection == "gender":
                         add_genders_to_organisation.append(entry["id"])
-                    events.append(
-                        self.build_event(
-                            EventType.Create,
-                            fqid,
-                            entry,
-                        )
-                    )
-                elif collection in ["user", "gender"] or (
-                    collection == "mediafile"
-                    and getattr(self, "action_name", None) == "clone"
-                ):
-                    list_fields: ListFields = {"add": {}, "remove": {}}
-                    for field, value in entry.items():
-                        model_field = model_registry[collection]().try_get_field(field)
-                        if isinstance(model_field, RelationListField):
-                            list_fields["add"][field] = value
-                    if list_fields["add"]:
-                        update_events.append(
-                            self.build_event(
-                                EventType.Update,
-                                fqid,
-                                fields=None,
-                                list_fields=list_fields,
-                            )
-                        )
-                elif collection == "meeting_user":
-                    update_events.append(
-                        self.build_event(
-                            EventType.Update,
-                            fqid,
-                            fields=entry,
-                        )
-                    )
+                    # INSERT new record
+                    self.sql.insert(collection, entry, entry["id"])
+                    self.created_fqids.add(fqid)
+                elif not pure_create_only:
+                    if collection in ["user", "gender"] or (
+                        collection == "mediafile"
+                        and getattr(self, "action_name", None) == "clone"
+                    ):
+                        # Add to list fields
+                        for field, value in entry.items():
+                            model_field = model_registry[collection]().try_get_field(field)
+                            if isinstance(model_field, RelationListField) and value:
+                                self.sql.add_to_list(collection, entry["id"], field, value)
+                        self.updated_fqids.add(fqid)
+                    elif collection == "meeting_user":
+                        # UPDATE existing record
+                        id_ = entry.pop("id")
+                        if entry:  # Only update if there are fields to update
+                            self.sql.update(collection, id_, entry)
+                        self.updated_fqids.add(fqid)
 
-        if pure_create_events:
-            return events
-        events.extend(update_events)
+        if pure_create_only:
+            return
 
-        # add meeting to committee/meeting_ids
-        events.append(
-            self.build_event(
-                EventType.Update,
-                fqid_from_collection_and_id("committee", meeting["committee_id"]),
-                list_fields={"add": {"meeting_ids": [meeting_id]}, "remove": {}},
-            )
-        )
+        # Add meeting to committee/meeting_ids
+        self.sql.add_to_list("committee", meeting["committee_id"], "meeting_ids", [meeting_id])
+        self.updated_fqids.add(fqid_from_collection_and_id("committee", meeting["committee_id"]))
 
-        # add meetings to organization if set in meeting, also genders if new created
-        adder: ListFieldsDict = {}
+        # Add meetings to organization if set in meeting, also genders if new created
         if meeting.get("is_active_in_organization_id"):
-            adder["active_meeting_ids"] = [meeting_id]
+            self.sql.add_to_list("organization", ONE_ORGANIZATION_ID, "active_meeting_ids", [meeting_id])
+            self.updated_fqids.add(ONE_ORGANIZATION_FQID)
         if meeting.get("template_for_organization_id"):
-            adder["template_meeting_ids"] = [meeting_id]
+            self.sql.add_to_list("organization", ONE_ORGANIZATION_ID, "template_meeting_ids", [meeting_id])
+            self.updated_fqids.add(ONE_ORGANIZATION_FQID)
         if add_genders_to_organisation:
-            adder["gender_ids"] = add_genders_to_organisation
+            self.sql.add_to_list("organization", ONE_ORGANIZATION_ID, "gender_ids", add_genders_to_organisation)
+            self.updated_fqids.add(ONE_ORGANIZATION_FQID)
 
-        if adder:
-            events.append(
-                self.build_event(
-                    EventType.Update,
-                    ONE_ORGANIZATION_FQID,
-                    list_fields={
-                        "add": adder,
-                        "remove": {},
-                    },
-                )
-            )
+        self.write_extra_updates(instance["meeting"])
 
-        self.append_extra_events(events, instance["meeting"])
-        return events
-
-    def append_extra_events(
-        self, events: list[Event], json_data: dict[str, Any]
-    ) -> None:
+    def write_extra_updates(self, json_data: dict[str, Any]) -> None:
+        """Write additional updates for meeting import."""
         # add new users to the organization.user_ids
         new_user_ids = []
         for user_entry in json_data.get("user", {}).values():
@@ -711,18 +682,8 @@ class MeetingImport(
                 new_user_ids.append(user_entry["id"])
 
         if new_user_ids:
-            events.append(
-                self.build_event(
-                    EventType.Update,
-                    ONE_ORGANIZATION_FQID,
-                    list_fields={
-                        "add": {
-                            "user_ids": new_user_ids,
-                        },
-                        "remove": {},
-                    },
-                )
-            )
+            self.sql.add_to_list("organization", ONE_ORGANIZATION_ID, "user_ids", new_user_ids)
+            self.updated_fqids.add(ONE_ORGANIZATION_FQID)
 
     def create_action_result_element(
         self, instance: dict[str, Any]

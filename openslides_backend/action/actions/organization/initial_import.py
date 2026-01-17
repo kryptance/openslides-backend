@@ -1,4 +1,3 @@
-from collections.abc import Iterable
 from typing import Any
 
 from ....i18n.translator import Translator
@@ -8,11 +7,7 @@ from ....models.checker import Checker, CheckException
 from ....models.models import Organization
 from ....shared.exceptions import ActionException
 from ....shared.filters import FilterOperator
-from ....shared.interfaces.event import Event, EventType
-from ....shared.interfaces.write_request import (
-    WriteRequest,
-    WriteRequestWithMigrationIndex,
-)
+from ....shared.interfaces.write_request import WriteRequest
 from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.util import INITIAL_DATA_FILE, get_initial_data_file
 from ...action import Action
@@ -53,11 +48,10 @@ class OrganizationInitialImport(SingularActionMixin, Action):
         instance = next(iter(action_data))
         self.validate_instance(instance)
         instance = self.update_instance(instance)
-        self.events.extend(self.create_events(instance))
+        self.write_initial_data(instance)
         result = self.create_action_result_element(instance)
         self.results.append(result)
-        write_request = self.build_write_request()
-        return (write_request, self.results)
+        return (None, self.results)
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         data = instance["data"]
@@ -111,33 +105,20 @@ class OrganizationInitialImport(SingularActionMixin, Action):
                 if entry.get("name"):
                     entry["name"] = _(entry["name"])
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+    def write_initial_data(self, instance: dict[str, Any]) -> None:
+        """Write all initial data directly to database via SQL."""
         json_data = instance["data"]
-        events = []
         for collection in json_data:
             if collection.startswith("_"):
                 continue
             for entry in json_data[collection].values():
+                self.sql.insert(collection, entry, entry["id"])
                 fqid = fqid_from_collection_and_id(collection, entry["id"])
-                events.append(
-                    self.build_event(
-                        EventType.Create,
-                        fqid,
-                        entry,
-                    )
-                )
-        return events
+                self.created_fqids.add(fqid)
 
-    def build_write_request(
-        self,
-    ) -> WriteRequest | None:
-        """
-        Add Migration Index to the one and only write request
-        """
-        write_request = self._build_write_request(WriteRequestWithMigrationIndex([]))
-        if write_request:
-            write_request.migration_index = self.data_migration_index
-        return write_request
+    def write_instance(self, instance: dict[str, Any]) -> None:
+        """Not used - writes happen in write_initial_data."""
+        pass
 
     def create_action_result_element(
         self, instance: dict[str, Any]

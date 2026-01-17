@@ -1,9 +1,7 @@
-from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any
 
 from openslides_backend.action.mixins.extend_history_mixin import ExtendHistoryMixin
-from openslides_backend.shared.interfaces.event import Event, EventType
 
 from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.typing import HistoryInformation
@@ -13,8 +11,11 @@ from ...action import Action
 class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
     extend_history_to = "user_id"
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
-        yield from super().create_events(instance)
+    def write_instance(self, instance: dict[str, Any]) -> None:
+        # Call parent write_instance first
+        super().write_instance(instance)
+
+        # Track related users for history
         db_instance = self.sql.get(
             "meeting_user",
             instance["id"],
@@ -55,11 +56,7 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
                 ).values()
             }
             for user_id in user_ids:
-                yield self.build_event(
-                    EventType.Update,
-                    fqid_from_collection_and_id("user", user_id),
-                    {"id": user_id},
-                )
+                self.updated_fqids.add(fqid_from_collection_and_id("user", user_id))
 
     def get_history_information(self) -> HistoryInformation | None:
         information: dict[str, list[tuple[str, ...]]] = {}

@@ -227,11 +227,13 @@ class BaseImportAction(BaseImportJsonUploadAction):
             return {}
         return super().base_update_instance(instance)
 
-    def handle_relation_updates(self, instance: dict[str, Any]) -> Any:
-        return {}
+    def handle_relation_updates(self, instance: dict[str, Any]) -> None:
+        """No relation updates for import actions."""
+        pass
 
-    def create_events(self, instance: dict[str, Any]) -> Any:
-        return []
+    def write_instance(self, instance: dict[str, Any]) -> None:
+        """Writes are handled by execute_other_action."""
+        pass
 
     def create_action_result_element(
         self, instance: dict[str, Any]
@@ -406,11 +408,13 @@ class BaseJsonUploadAction(BaseImportJsonUploadAction):
             },
         )
 
-    def handle_relation_updates(self, instance: dict[str, Any]) -> Any:
-        return {}
+    def handle_relation_updates(self, instance: dict[str, Any]) -> None:
+        """No relation updates for import preview actions."""
+        pass
 
-    def create_events(self, instance: dict[str, Any]) -> Any:
-        return []
+    def write_instance(self, instance: dict[str, Any]) -> None:
+        """Data is written directly in store_rows_in_the_import_preview_meeting_collection."""
+        pass
 
     def create_action_result_element(
         self, instance: dict[str, Any]

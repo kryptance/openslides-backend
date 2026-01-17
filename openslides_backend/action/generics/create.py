@@ -1,7 +1,5 @@
-from collections.abc import Iterable
 from typing import Any
 
-from ...shared.interfaces.event import Event, EventType
 from ...shared.patterns import fqid_from_collection_and_id
 from ..action import Action
 from ..util.typing import ActionData, ActionResultElement
@@ -14,9 +12,6 @@ class CreateAction(Action):
     Uses direct SQL for writing via self.sql.insert().
     The PostgreSQL transaction ensures consistency.
     """
-
-    # Set to True to use direct SQL instead of events (default for new code)
-    use_direct_sql: bool = True
 
     def prepare_action_data(self, action_data: ActionData) -> ActionData:
         if not action_data:
@@ -49,12 +44,10 @@ class CreateAction(Action):
                 instance[field.own_field_name] = field.default
         return instance
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+    def write_instance(self, instance: dict[str, Any]) -> None:
         """
-        Creates events for one instance of the current model.
-
-        If use_direct_sql is True, this also writes directly to the database.
-        Events are still generated for history tracking and backward compatibility.
+        Writes one instance to the database via direct SQL INSERT.
+        Tracks the fqid for history.
         """
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
 
@@ -63,14 +56,11 @@ class CreateAction(Action):
             k: v for k, v in instance.items() if not k.startswith("meta_")
         }
 
-        # Direct SQL write if enabled
-        if self.use_direct_sql:
-            self.sql.insert(self.model.collection, write_instance, instance["id"])
+        # Direct SQL INSERT
+        self.sql.insert(self.model.collection, write_instance, instance["id"])
 
-        # Still yield the event for history tracking
-        if "meta_new" in instance:
-            del instance["meta_new"]
-        yield self.build_event(EventType.Create, fqid, instance)
+        # Track for history
+        self.created_fqids.add(fqid)
 
     def create_action_result_element(
         self, instance: dict[str, Any]

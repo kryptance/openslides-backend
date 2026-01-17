@@ -1,9 +1,8 @@
-from collections.abc import Iterable
 from typing import Any
 
 from ....models.models import Organization
 from ....permissions.management_levels import OrganizationManagementLevel
-from ...action import Action, Event
+from ...action import Action
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
 from ..history_position.delete import HistoryPositionDelete
@@ -27,5 +26,6 @@ class DeleteHistoryInformation(Action):
         )
         return instance
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
-        return []
+    def write_instance(self, instance: dict[str, Any]) -> None:
+        """Writes are delegated to execute_other_action."""
+        pass

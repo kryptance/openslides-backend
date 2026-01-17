@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 from openslides_backend.action.actions.meeting.mixins import MeetingPermissionMixin
 from openslides_backend.models.checker import (
@@ -10,7 +10,6 @@ from openslides_backend.models.checker import (
 )
 from openslides_backend.models.models import Meeting, MeetingUser
 from openslides_backend.shared.exceptions import ActionException, PermissionDenied
-from openslides_backend.shared.interfaces.event import Event, EventType
 from openslides_backend.shared.patterns import fqid_from_collection_and_id
 from openslides_backend.shared.schema import id_list_schema, required_id_schema
 from openslides_backend.shared.util import ONE_ORGANIZATION_FQID, ONE_ORGANIZATION_ID
@@ -307,28 +306,19 @@ class MeetingClone(MeetingImport):
                     mediafile["id"], self.replace_map["mediafile"][mediafile["id"]]
                 )
 
-    def append_extra_events(
-        self, events: list[Event], json_data: dict[str, Any]
-    ) -> None:
+    def write_extra_updates(self, json_data: dict[str, Any]) -> None:
+        """Write additional updates for meeting clone."""
         meeting_id = self.get_meeting_from_json(json_data)["id"]
         if organization_tag_ids := self.get_meeting_from_json(json_data).get(
             "organization_tag_ids"
         ):
             meeting_fqid = fqid_from_collection_and_id("meeting", meeting_id)
             for organization_tag_id in organization_tag_ids:
-                events.append(
-                    self.build_event(
-                        EventType.Update,
-                        fqid_from_collection_and_id(
-                            "organization_tag", organization_tag_id
-                        ),
-                        list_fields={
-                            "add": {
-                                "tagged_ids": [meeting_fqid],
-                            },
-                            "remove": {},
-                        },
-                    ),
+                self.sql.add_to_list(
+                    "organization_tag", organization_tag_id, "tagged_ids", [meeting_fqid]
+                )
+                self.updated_fqids.add(
+                    fqid_from_collection_and_id("organization_tag", organization_tag_id)
                 )
 
     def get_committee_id(self, instance: dict[str, Any]) -> int:

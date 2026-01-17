@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from typing import Any, cast
 
 import fastjsonschema
@@ -12,7 +12,6 @@ from ....models.fields import TRUE_VALUES, BooleanField
 from ....models.models import User
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator, Or
-from ....shared.interfaces.event import Event
 from ....shared.schema import schema_version
 from ....shared.typing import Schema
 from ...mixins.meeting_user_helper import get_meeting_user
@@ -226,11 +225,12 @@ class UserSaveSamlAccount(
             self.execute_other_action(UserUpdate, [mu for mu in meeting_users.values()])
         return instance
 
-    def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
+    def write_instance(self, instance: dict[str, Any]) -> None:
         """
-        delegated to execute_other_action
+        Writes are delegated to execute_other_action (UserCreate/UserUpdate).
+        This method does nothing.
         """
-        return []
+        pass
 
     def create_action_result_element(
         self, instance: dict[str, Any]
