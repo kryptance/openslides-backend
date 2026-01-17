@@ -20,6 +20,7 @@ class Organization(Model):
         to={"gender": "organization_id"}, is_view_field=True, is_primary=True
     )
     disable_forward_with_attachments = fields.BooleanField()
+    restrict_edit_forward_committees = fields.BooleanField()
     enable_electronic_voting = fields.BooleanField()
     enable_chat = fields.BooleanField()
     limit_of_meetings = fields.IntegerField(
