@@ -1,7 +1,8 @@
 from typing import Any, cast
 
-from ...models.base import Model
+from ...models.base import Model, model_registry
 from ...models.fields import BaseRelationField
+from ...shared.exceptions import RequiredFieldsException
 from ...shared.patterns import (
     FullQualifiedField,
     collection_and_id_from_fqid,
@@ -92,14 +93,30 @@ class RelationManager:
         """
         Applies all given relation updates directly to the database.
         """
+        # Import here to avoid circular import
+        from ..generics.delete import DeleteAction
+
         for fqfield, relations_element in relations.items():
             fqid = fqid_from_fqfield(fqfield)
             field_name = field_from_fqfield(fqfield)
             collection, id_ = collection_and_id_from_fqid(fqid)
 
+            # Skip updates to models that are already marked for deletion
+            if fqid in DeleteAction._pending_delete_fqids:
+                continue
+
             if relations_element["type"] in ("add", "remove"):
                 field_update_element = cast(FieldUpdateElement, relations_element)
                 value = field_update_element["value"]
+
+                # Validate required fields before writing
+                if value is None:
+                    model = model_registry[collection]()
+                    field = model.get_field(field_name)
+                    if field.required:
+                        raise RequiredFieldsException(
+                            f"Update of {fqid}", [field_name]
+                        )
 
                 # Direct SQL write
                 self.sql.update(collection, id_, {field_name: value})

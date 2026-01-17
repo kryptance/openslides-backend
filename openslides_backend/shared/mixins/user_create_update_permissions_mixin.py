@@ -4,6 +4,7 @@ from functools import reduce
 from typing import Any, cast
 
 from openslides_backend.action.relations.relation_manager import RelationManager
+from openslides_backend.services.database.interface import Database
 from openslides_backend.permissions.base_classes import Permission
 from openslides_backend.permissions.management_levels import (
     CommitteeManagementLevel,

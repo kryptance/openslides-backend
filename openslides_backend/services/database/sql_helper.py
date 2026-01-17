@@ -660,11 +660,13 @@ class SqlHelper(SqlQueryHelper):
             if field_name.startswith("meta_"):
                 continue
             field = collection_cls.get_field(field_name)
-            if field.is_view_field or field_name == "organization_id":
+            if field_name == "organization_id":
                 continue
+            # Check if this is an N:M relation field (has write_fields)
             if self._is_primary_nm_relation(field):
                 intermediate_tables[field_name] = field
-            else:
+            elif not field.is_view_field:
+                # Only add non-view fields as simple fields
                 simple_fields[field_name] = value
 
         return simple_fields, intermediate_tables

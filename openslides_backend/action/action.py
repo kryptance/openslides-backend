@@ -3,7 +3,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import fastjsonschema
 from psycopg.types.json import Jsonb
@@ -128,7 +128,14 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         use_meeting_ids_for_archived_meeting_check: bool | None = None,
         sql: SqlHelper | None = None,
     ) -> None:
-        super().__init__(services, datastore, logging)
+        # Keep datastore reference for backward compatibility
+        self.datastore = datastore
+        # Initialize SqlHelper if provided, otherwise create from datastore connection
+        if sql is not None:
+            self._sql = sql
+        else:
+            self._sql = SqlHelper(datastore.connection, logging, env)
+        super().__init__(services, self._sql, logging)
         self.relation_manager = relation_manager
         self.logger = logging.getLogger(__name__)
         self.env = env
@@ -138,11 +145,6 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             self.use_meeting_ids_for_archived_meeting_check = (
                 use_meeting_ids_for_archived_meeting_check
             )
-        # Initialize SqlHelper if provided, otherwise create from datastore connection
-        if sql is not None:
-            self.sql = sql
-        else:
-            self.sql = SqlHelper(self.datastore.connection, logging, env)
         self.results = []
         self.cascaded_actions_history = {}
         # Initialize tracking sets for history

@@ -68,11 +68,11 @@ def test_two_write_requests_with_locked_fields(db_connection: Connection) -> Non
 
 
 def test_no_events(db_connection: Connection) -> None:
-    with pytest.raises(BadCodingException) as e_info:
-        with get_new_os_conn() as conn:
-            extended_database = ExtendedDatabase(conn, MagicMock(), MagicMock())
-            extended_database.write(create_write_requests([{"events": []}]))
-    assert "Events are needed." == e_info.value.message
+    # Empty events are now valid since model writes happen directly via SqlHelper
+    with get_new_os_conn() as conn:
+        extended_database = ExtendedDatabase(conn, MagicMock(), MagicMock())
+        result = extended_database.write(create_write_requests([{"events": []}]))
+    assert result == []
 
 
 # def test_otel(json_client, data, redis_connection):
