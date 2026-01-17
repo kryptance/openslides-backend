@@ -22,6 +22,7 @@ class MotionStateCreateAction(WeightMixin, CreateActionWithInferredMeeting):
     schema = DefaultSchema(MotionState()).get_create_schema(
         required_properties=["name", "workflow_id"],
         optional_properties=[
+            "meeting_id",  # Allow passing directly to avoid reading workflow
             "weight",
             "recommendation_label",
             "css_class",

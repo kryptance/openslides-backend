@@ -6,7 +6,6 @@ from typing import Any, TypeVar, cast
 import fastjsonschema
 from psycopg.errors import RaiseException
 
-from openslides_backend.services.database.extended_database import ExtendedDatabase
 from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
     get_new_os_conn,
@@ -22,7 +21,6 @@ from ..shared.handlers.base_handler import BaseHandler
 from ..shared.interfaces.env import Env
 from ..shared.interfaces.logging import LoggingModule
 from ..shared.interfaces.services import Services
-from ..shared.interfaces.write_request import WriteRequest
 from ..shared.otel import make_span
 from ..shared.schema import schema_version
 from . import actions  # noqa
@@ -123,34 +121,21 @@ class ActionHandler(BaseHandler):
 
             try:
                 with get_new_os_conn() as conn:
-                    self.datastore = ExtendedDatabase(conn, self.logging, self.env)
                     self.sql = SqlHelper(conn, self.logging, self.env)
                     results: ActionsResponseResults = []
                     if atomic:
-                        results = self.execute_write_requests(
-                            self.parse_actions, payload
-                        )
+                        results = self.execute_actions(self.parse_actions, payload)
                     else:
-
-                        def transform_to_list(
-                            tuple: tuple[WriteRequest | None, ActionResults | None],
-                        ) -> tuple[list[WriteRequest], ActionResults | None]:
-                            return (
-                                [tuple[0]] if tuple[0] is not None else [],
-                                tuple[1],
-                            )
-
                         for element in payload:
                             try:
-                                result = self.execute_write_requests(
-                                    lambda e: transform_to_list(self.perform_action(e)),
+                                result = self.execute_actions(
+                                    lambda e: self.perform_action(e)[1],
                                     element,
                                 )
                                 results.append(result)
                             except ActionException as exception:
                                 error = cast(ActionError, exception.get_json())
                                 results.append(error)
-                            self.datastore.reset()
 
                     # execute cleanup methods
                     for on_success in self.on_success:
@@ -181,34 +166,29 @@ class ActionHandler(BaseHandler):
             internal=True,
         )
 
-    def execute_write_requests(
+    def execute_actions(
         self,
-        get_write_requests: Callable[..., tuple[list[WriteRequest], T]],
+        get_results: Callable[..., T],
         *args: Any,
     ) -> T:
-        with make_span(self.env, "execute write requests"):
+        """Execute actions with retry logic for lock conflicts."""
+        with make_span(self.env, "execute actions"):
             retries = 0
             while True:
                 try:
-                    write_requests, data = get_write_requests(*args)
-                    if write_requests:
-                        self.datastore.write(write_requests)
-                    return data
+                    return get_results(*args)
                 except DatastoreLockedException as exception:
                     retries += 1
                     if retries >= self.MAX_RETRY:
                         raise ActionException(exception.message)
-                    else:
-                        self.datastore.reset()
 
     def parse_actions(
         self, payload: Payload
-    ) -> tuple[list[WriteRequest], ActionsResponseResults]:
+    ) -> ActionsResponseResults:
         """
         Parses actions request send by client. Raises ActionException or
         PermissionDenied if something went wrong.
         """
-        write_requests: list[WriteRequest] = []
         action_response_results: ActionsResponseResults = []
         relation_manager = RelationManager(self.sql)
         action_name_list = []
@@ -225,28 +205,21 @@ class ActionHandler(BaseHandler):
                     else:
                         action_name_list.append(action_name)
                 try:
-                    write_request, results = self.perform_action(
-                        element, relation_manager
-                    )
+                    results = self.perform_action(element, relation_manager)
                 except ActionException as exception:
                     exception.action_error_index = i
                     raise exception
 
-                if write_request:
-                    write_requests.append(write_request)
                 action_response_results.append(results)
 
-        self.logger.debug("Write request is ready.")
-        return (
-            write_requests,
-            action_response_results,
-        )
+        self.logger.debug("Actions performed successfully.")
+        return action_response_results
 
     def perform_action(
         self,
         action_payload_element: PayloadElement,
         relation_manager: RelationManager | None = None,
-    ) -> tuple[WriteRequest | None, ActionResults | None]:
+    ) -> ActionResults | None:
         action_name = action_payload_element["action"]
         ActionClass = actions_map.get(action_name)
         # Actions cannot be accessed in the following three cases:
@@ -267,31 +240,22 @@ class ActionHandler(BaseHandler):
 
         self.logger.info(f"Performing action {action_name}.")
         action = ActionClass(
-            self.services, self.datastore, relation_manager, self.logging, self.env,
+            self.services, relation_manager, self.logging, self.env,
             sql=self.sql,
         )
         action_data = deepcopy(action_payload_element["data"])
 
         try:
-            # with self.datastore.get_database_context():
             with make_span(self.env, "action.perform"):
-                write_request, results = action.perform(
+                _write_request, results = action.perform(
                     action_data, self.user_id, internal=self.internal
                 )
-            if write_request:
-                action.validate_write_request(write_request)
-
-                # # add locked_fields to request
-                # write_request.locked_fields = self.datastore.locked_fields
-                # # reset locked fields, but not changed models - these might be needed
-                # # by another action
-                # self.datastore.reset(hard=False)
 
             # add on_success routine
             if on_success := action.get_on_success(action_data):
                 self.on_success.append(on_success)
 
-            return (write_request, results)
+            return results
         except ActionException as exception:
             self.logger.error(
                 f"Error occured on index {action.index}: {exception.message}"

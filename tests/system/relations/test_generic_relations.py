@@ -7,7 +7,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
     def test_generic_O2O_empty(self) -> None:
         self.set_models({"fake_model_a/1": {}, "fake_model_b/2": {}})
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_oo,
             field_name="fake_model_b_generic_oo",
             instance={"id": 1, "fake_model_b_generic_oo": 2},
@@ -31,7 +31,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_oo,
             field_name="fake_model_b_generic_oo",
             instance={"id": 1, "fake_model_b_generic_oo": 3},
@@ -59,7 +59,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_oo,
             field_name="fake_model_b_generic_oo",
             instance={"id": 1, "fake_model_b_generic_oo": None},
@@ -78,7 +78,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
     def test_generic_O2M_empty(self) -> None:
         self.set_models({"fake_model_a/1": {}, "fake_model_b/2": {}})
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_om,  # type: ignore
             field_name="fake_model_b_generic_om",
             instance={"id": 1, "fake_model_b_generic_om": 2},
@@ -103,7 +103,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_om,  # type: ignore
             field_name="fake_model_b_generic_om",
             instance={"id": 2, "fake_model_b_generic_om": 3},
@@ -127,7 +127,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_om,  # type: ignore
             field_name="fake_model_b_generic_om",
             instance={"id": 1, "fake_model_b_generic_om": None},
@@ -145,7 +145,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
     def test_generic_M2M_empty(self) -> None:
         self.set_models({"fake_model_a/1": {}, "fake_model_b/2": {}})
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_mm,
             field_name="fake_model_b_generic_mm",
             instance={"id": 1, "fake_model_b_generic_mm": [2]},
@@ -169,7 +169,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_mm,
             field_name="fake_model_b_generic_mm",
             instance={"id": 2, "fake_model_b_generic_mm": [3]},
@@ -192,7 +192,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_b_generic_mm,
             field_name="fake_model_b_generic_mm",
             instance={"id": 1, "fake_model_b_generic_mm": []},
@@ -216,7 +216,7 @@ class GenericRelationsTest(BaseRelationsTestCase):
             }
         )
         handler = SingleRelationHandlerWithContext(
-            datastore=self.datastore,
+            sql=self.sql,
             field=FakeModelA.fake_model_generic_multitype,
             field_name="fake_model_generic_multitype",
             instance={"id": 1, "fake_model_generic_multitype": None},

@@ -19,5 +19,6 @@ class CreateActionWithListOfSpeakersMixin(Action):
         return [
             {
                 "content_object_id": f"{str(self.model.collection)}{KEYSEPARATOR}{instance['id']}",
+                "meeting_id": instance["meeting_id"],  # Pass directly to avoid DB lookup
             }
         ]

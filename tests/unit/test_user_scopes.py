@@ -7,20 +7,19 @@ from openslides_backend.shared.mixins.user_scope_mixin import UserScope, UserSco
 
 class UserScopeTest(TestCase):
     def setUp(self) -> None:
-        self.mock_datastore = MagicMock()
-        self.mixin = UserScopeMixin(MagicMock(), self.mock_datastore, MagicMock())
+        self.mock_sql = MagicMock()
+        self.mixin = UserScopeMixin(MagicMock(), self.mock_sql, MagicMock())
 
     def set_user_data(self, data: dict[str, Any]) -> None:
-        self.mock_datastore.get = MagicMock(return_value=data)
+        self.mock_sql.get = MagicMock(return_value=data)
 
     def set_meeting_committees(self, ids: list[int]) -> None:
+        # Return format for sql.get_many is {id: data, ...}
         return_val = {
-            "meeting": {
-                i + 1: {"committee_id": id, "is_active_in_organization_id": 1}
-                for i, id in enumerate(ids)
-            }
+            i + 1: {"committee_id": id, "is_active_in_organization_id": 1}
+            for i, id in enumerate(ids)
         }
-        self.mock_datastore.get_many = MagicMock(return_value=return_val)
+        self.mock_sql.get_many = MagicMock(return_value=return_val)
 
     def get_scope(self) -> UserScope:
         return self.mixin.get_user_scope(1)[0]

@@ -48,7 +48,13 @@ class CreateAction(Action):
         """
         Writes one instance to the database via direct SQL INSERT.
         Tracks the fqid for history.
+
+        Skips if already written via apply_instance.
         """
+        # Skip if already written (e.g., via apply_instance for child actions)
+        if instance["id"] in self._written_instance_ids:
+            return
+
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
 
         # Clean up meta fields before writing
@@ -61,6 +67,7 @@ class CreateAction(Action):
 
         # Track for history
         self.created_fqids.add(fqid)
+        self._written_instance_ids.add(instance["id"])
 
     def create_action_result_element(
         self, instance: dict[str, Any]

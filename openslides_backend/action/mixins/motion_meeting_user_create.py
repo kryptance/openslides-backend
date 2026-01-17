@@ -28,7 +28,7 @@ def build_motion_meeting_user_create_action(
         model = ModelClass()
         schema = DefaultSchema(ModelClass()).get_create_schema(
             required_properties=["motion_id", "meeting_user_id"],
-            optional_properties=["weight"] if with_weight else [],
+            optional_properties=["meeting_id", "weight"] if with_weight else ["meeting_id"],
         )
         permission = Permissions.Motion.CAN_MANAGE_METADATA
 

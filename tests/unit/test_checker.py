@@ -2,7 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
-from unittest import TestCase
+from unittest import TestCase, skipIf
 
 from psycopg.types.json import Jsonb
 
@@ -51,10 +51,11 @@ class TestCheckerCheckMigrationIndex(TestCase):
 
     def test_migration_index_correct(self) -> None:
         self.check_migration_index({"_migration_index": BACKEND_MIGRATION_INDEX})
-        self.check_migration_index(
-            {"_migration_index": BACKEND_MIGRATION_INDEX - 1},
-            migration_mode="permissive",
-        )
+        if BACKEND_MIGRATION_INDEX > 1:
+            self.check_migration_index(
+                {"_migration_index": BACKEND_MIGRATION_INDEX - 1},
+                migration_mode="permissive",
+            )
 
     def test_migration_index_is_none_error(self) -> None:
         self.check_migration_index(
@@ -74,6 +75,7 @@ class TestCheckerCheckMigrationIndex(TestCase):
             expected_error="JSON does not match schema: data._migration_index must be bigger than or equal to 1",
         )
 
+    @skipIf(BACKEND_MIGRATION_INDEX <= 1, "No valid migration index below 1")
     def test_migration_index_lower_than_backend_MI_permissive_mode(self) -> None:
         migration_index = BACKEND_MIGRATION_INDEX - 1
         self.check_migration_index(
@@ -95,6 +97,7 @@ class TestCheckerCheckMigrationIndex(TestCase):
             migration_mode="permissive",
         )
 
+    @skipIf(BACKEND_MIGRATION_INDEX <= 1, "No valid migration index below 1")
     def test_migration_index_lower_than_backend_MI_error(self) -> None:
         migration_index = BACKEND_MIGRATION_INDEX - 1
         self.check_migration_index(

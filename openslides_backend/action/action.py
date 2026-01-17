@@ -20,7 +20,6 @@ from ..permissions.management_levels import (
 from ..permissions.permission_helper import has_organization_management_level, has_perm
 from ..permissions.permissions import Permission
 from ..presenter.base import BasePresenter
-from ..services.database.interface import Database
 from ..services.database.sql_helper import SqlHelper
 from ..shared.exceptions import (
     ActionException,
@@ -120,7 +119,6 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
     def __init__(
         self,
         services: Services,
-        datastore: Database,
         relation_manager: RelationManager,
         logging: LoggingModule,
         env: Env,
@@ -128,13 +126,9 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         use_meeting_ids_for_archived_meeting_check: bool | None = None,
         sql: SqlHelper | None = None,
     ) -> None:
-        # Keep datastore reference for backward compatibility
-        self.datastore = datastore
-        # Initialize SqlHelper if provided, otherwise create from datastore connection
-        if sql is not None:
-            self._sql = sql
-        else:
-            self._sql = SqlHelper(datastore.connection, logging, env)
+        if sql is None:
+            raise ValueError("sql parameter is required")
+        self._sql = sql
         super().__init__(services, self._sql, logging)
         self.relation_manager = relation_manager
         self.logger = logging.getLogger(__name__)
@@ -151,6 +145,8 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         self.created_fqids = set()
         self.updated_fqids = set()
         self.deleted_fqids = set()
+        # Track which instances have been written to avoid double-writes
+        self._written_instance_ids: set[int] = set()
 
     def perform(
         self,
@@ -303,7 +299,12 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
                 model.collection,
                 instance[identifier],
                 ["meeting_id"],
-            ) or {}
+            )
+            if not db_instance:
+                fqid = fqid_from_collection_and_id(
+                    model.collection, instance[identifier]
+                )
+                raise ActionException(f"Model '{fqid}' does not exist.")
             return db_instance["meeting_id"]
 
     @original_instances
@@ -631,10 +632,27 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         self, instance: dict[str, Any], fqid: FullQualifiedId | None = None
     ) -> None:
         """
-        No-op: With direct SQL access, changes are applied directly to the database
-        in the respective action classes. This method is kept for compatibility.
+        Placeholder for early model write.
+
+        With direct SQL, actions that need child actions to see the model
+        should call write_instance_early() instead, which writes the model
+        and tracks it to avoid double-writes.
+
+        This method is a no-op for backward compatibility with actions that
+        don't need early writes (e.g., actions with incomplete instances).
         """
         pass
+
+    def write_instance_early(self, instance: dict[str, Any]) -> None:
+        """
+        Write instance to database early, before execute_other_action.
+
+        Use this when child actions need to read this model from the database.
+        The instance is tracked so write_instance won't write it again.
+        """
+        if "id" in instance and instance["id"] not in self._written_instance_ids:
+            self.write_instance(instance)
+            self._written_instance_ids.add(instance["id"])
 
     def execute_other_action(
         self,
@@ -658,7 +676,6 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
 
             action = ActionClass(
                 self.services,
-                self.datastore,
                 self.relation_manager,
                 self.logging,
                 self.env,
@@ -701,7 +718,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         presenter_instance = PresenterClass(
             payload,
             self.services,
-            self.datastore,
+            self.sql,
             self.logging,
             self.user_id,
         )

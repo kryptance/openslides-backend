@@ -22,6 +22,7 @@ from openslides_backend.permissions.permissions import Permission
 from openslides_backend.services.auth.interface import AuthenticationService
 from openslides_backend.services.database.commands import GetManyRequest
 from openslides_backend.services.database.extended_database import ExtendedDatabase
+from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
     get_new_os_conn,
 )
@@ -137,10 +138,11 @@ class BaseSystemTestCase(TestCase):
         """
         Overrides the TestCases run method.
         Provides an ExtendedDatabase in self.datastore with an open psycopg connection.
-        Also stores its connection in self.connection.
+        Also stores its connection in self.connection and a SqlHelper in self.sql.
         """
         with get_new_os_conn() as conn:
             self.datastore = ExtendedDatabase(conn, MagicMock(), MagicMock())
+            self.sql = SqlHelper(conn, MagicMock(), MagicMock())
             self.connection = conn
             return super().run(result)
 

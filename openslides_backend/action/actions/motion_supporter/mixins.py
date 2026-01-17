@@ -50,17 +50,23 @@ class SupporterActionMixin(DelegationBasedRestrictionMixin):
         motions = self.sql.get_many(
             "motion", motion_ids, ["meeting_id", "state_id", "supporter_ids"]
         ) if motion_ids else {}
-        meeting_ids = list({mot["meeting_id"] for mot in motions.values()})
+        # Collect meeting_ids from motions and instances (for internal calls)
+        meeting_ids_from_motions = {mot["meeting_id"] for mot in motions.values() if mot.get("meeting_id")}
+        meeting_ids_from_instances = {inst["meeting_id"] for inst in action_data if inst.get("meeting_id")}
+        meeting_ids = list(meeting_ids_from_motions | meeting_ids_from_instances)
         meetings = self.sql.get_many(
             "meeting", meeting_ids, ["motions_supporters_min_amount"]
         ) if meeting_ids else {}
-        state_ids = list({mot["state_id"] for mot in motions.values()})
+        state_ids = list({mot["state_id"] for mot in motions.values() if mot.get("state_id")})
         states = self.sql.get_many(
             "motion_state", state_ids, ["allow_support"]
         ) if state_ids else {}
         for instance in action_data:
             motion = motions.get(self.get_motion_id(instance), {})
-            meeting_id = motion["meeting_id"]
+            # Use meeting_id from instance if available (internal call), else from motion
+            meeting_id = instance.get("meeting_id") or motion.get("meeting_id")
+            if not meeting_id:
+                raise ActionException("Could not determine meeting_id for motion supporter.")
             meeting = meetings.get(meeting_id, {})
             if meeting.get("motions_supporters_min_amount") == 0:
                 raise ActionException("Motion supporters system deactivated.")
@@ -70,7 +76,7 @@ class SupporterActionMixin(DelegationBasedRestrictionMixin):
                 Permissions.Motion.CAN_MANAGE_METADATA,
                 meeting_id,
             ):
-                state = states.get(motion["state_id"], {})
+                state = states.get(motion.get("state_id"), {})
 
                 if state.get("allow_support") is False:
                     raise ActionException("The state does not allow support.")

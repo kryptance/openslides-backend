@@ -20,6 +20,7 @@ class AgendaItemCreate(CreateActionWithInferredMeeting):
     schema = DefaultSchema(AgendaItem()).get_create_schema(
         required_properties=["content_object_id"],
         optional_properties=[
+            "meeting_id",  # Allow passing directly to avoid DB lookup
             "item_number",
             "comment",
             "type",

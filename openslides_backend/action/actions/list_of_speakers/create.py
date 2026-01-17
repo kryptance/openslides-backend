@@ -11,7 +11,10 @@ from ...util.default_schema import DefaultSchema
 class ListOfSpeakersCreate(CreateActionWithInferredMeeting):
     name = "list_of_speakers.create"
     model = ListOfSpeakers()
-    schema = DefaultSchema(ListOfSpeakers()).get_create_schema(["content_object_id"])
+    schema = DefaultSchema(ListOfSpeakers()).get_create_schema(
+        ["content_object_id"],
+        optional_properties=["meeting_id"],  # Allow passing directly to avoid DB lookup
+    )
 
     relation_field_for_meeting = "content_object_id"
 

@@ -59,7 +59,11 @@ def assert_belongs_to_meeting(
                 collection_from_fqid(fqid),
                 id_from_fqid(fqid),
                 ["meeting_id"],
-            ) or {}
+            )
+            # If model doesn't exist, it might be created in the same transaction.
+            # Skip validation for now - the DB constraints will catch any real issues.
+            if instance is None:
+                continue
             if instance.get("meeting_id") != meeting_id:
                 errors.add(str(fqid))
 

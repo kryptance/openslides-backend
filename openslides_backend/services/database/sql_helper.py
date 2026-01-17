@@ -659,7 +659,10 @@ class SqlHelper(SqlQueryHelper):
         for field_name, value in fields.items():
             if field_name.startswith("meta_"):
                 continue
-            field = collection_cls.get_field(field_name)
+            # Skip fields that aren't model fields (e.g., action-specific fields)
+            field = collection_cls.try_get_field(field_name)
+            if not field:
+                continue
             if field_name == "organization_id":
                 continue
             # Check if this is an N:M relation field (has write_fields)

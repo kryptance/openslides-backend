@@ -9,7 +9,7 @@ from openslides_backend.action.relations.typing import RelationFieldUpdates
 from openslides_backend.action.util.action_type import ActionType
 from openslides_backend.action.util.register import register_action
 from openslides_backend.models import fields
-from openslides_backend.services.database.extended_database import ExtendedDatabase
+from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
     get_new_os_conn,
 )
@@ -318,10 +318,10 @@ class FakeModelAUpdateAction(UpdateAction):
 
 class SingleRelationHandlerWithContext(SingleRelationHandler):
     """
-    Overwrites the perform method of the SingleRelationHandler to provide a datastore context.
+    Overwrites the perform method of the SingleRelationHandler to provide a SQL context.
     """
 
     def perform(self) -> RelationFieldUpdates:
         with get_new_os_conn() as conn:
-            self.datastore = ExtendedDatabase(conn, MagicMock(), MagicMock())
+            self.sql = SqlHelper(conn, MagicMock(), MagicMock())
             return super().perform()

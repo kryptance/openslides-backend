@@ -88,6 +88,7 @@ class CreateActionWithAgendaItemMixin(Action):
         agenda_item_action_data["content_object_id"] = fqid_from_collection_and_id(
             self.model.collection, instance["id"]
         )
+        agenda_item_action_data["meeting_id"] = instance["meeting_id"]  # Pass directly to avoid DB lookup
         return [agenda_item_action_data]
 
     @staticmethod

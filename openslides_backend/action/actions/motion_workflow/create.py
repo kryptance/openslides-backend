@@ -34,10 +34,21 @@ class MotionWorkflowCreateAction(CreateActionWithDependencies):
                 "name": MOTION_STATE_DEFAULT_NAME,
                 "weight": 1,
                 "workflow_id": instance["id"],
+                "meeting_id": instance["meeting_id"],  # Pass directly to avoid DB lookup
                 "first_state_of_workflow_id": instance["id"],
                 "set_workflow_timestamp": True,
             }
         ]
+
+    def handle_dependency_result(
+        self,
+        instance: dict[str, Any],
+        ActionClass: type[Action],
+        action_results: list[dict[str, Any]] | None,
+    ) -> None:
+        """Set first_state_id on workflow from state creation results."""
+        if ActionClass == MotionStateCreateAction and action_results:
+            instance["first_state_id"] = action_results[0]["id"]
 
 
 @register_action(
@@ -59,13 +70,15 @@ class MotionWorkflowCreateSimpleWorkflowAction(CreateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        self.apply_instance(instance)
+        # Pass meeting_id directly to states so they don't need to read the workflow
+        meeting_id = instance["meeting_id"]
         action_data = [
             {
                 "name": _("submitted"),
                 "allow_create_poll": True,
                 "allow_support": True,
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
                 "first_state_of_workflow_id": instance["id"],
                 "set_workflow_timestamp": True,
             },
@@ -75,6 +88,7 @@ class MotionWorkflowCreateSimpleWorkflowAction(CreateAction):
                 "css_class": "green",
                 "merge_amendment_into_final": "do_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("rejected"),
@@ -82,6 +96,7 @@ class MotionWorkflowCreateSimpleWorkflowAction(CreateAction):
                 "css_class": "red",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("not decided"),
@@ -89,6 +104,7 @@ class MotionWorkflowCreateSimpleWorkflowAction(CreateAction):
                 "css_class": "grey",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
         ]
 
@@ -101,6 +117,9 @@ class MotionWorkflowCreateSimpleWorkflowAction(CreateAction):
             action_data,
         )
         first_state_id = action_results[0]["id"]  # type: ignore
+        # Set first_state_id on workflow before it's written
+        instance["first_state_id"] = first_state_id
+
         next_state_ids = [ar["id"] for ar in action_results[-3:]]  # type: ignore
         action_data = [{"id": first_state_id, "next_state_ids": next_state_ids}]
         self.execute_other_action(
@@ -129,13 +148,15 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        self.apply_instance(instance)
+        # Pass meeting_id directly to states so they don't need to read the workflow
+        meeting_id = instance["meeting_id"]
         action_data = [
             {
                 "name": _("in progress"),
                 "allow_submitter_edit": True,
                 "set_number": False,
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
                 "first_state_of_workflow_id": instance["id"],
                 "set_workflow_timestamp": False,
                 "merge_amendment_into_final": "do_not_merge",
@@ -146,6 +167,7 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "name": _("submitted"),
                 "allow_support": False,
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
                 "set_number": False,
                 "merge_amendment_into_final": "do_not_merge",
             },
@@ -153,6 +175,7 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "name": _("permitted"),
                 "allow_create_poll": True,
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
                 "merge_amendment_into_final": "do_not_merge",
             },
             {
@@ -161,6 +184,7 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "css_class": "green",
                 "merge_amendment_into_final": "do_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("rejected"),
@@ -168,12 +192,14 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "css_class": "red",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("withdrawn"),
                 "css_class": "grey",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("adjourned"),
@@ -181,6 +207,7 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "css_class": "grey",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("not concerned"),
@@ -188,6 +215,7 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "css_class": "grey",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("referred to"),
@@ -197,12 +225,14 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
                 "show_state_extension_field": "true",
                 "show_recommendation_extension_field": "true",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
             {
                 "name": _("not permitted"),
                 "css_class": "grey",
                 "merge_amendment_into_final": "do_not_merge",
                 "workflow_id": instance["id"],
+                "meeting_id": meeting_id,
             },
         ]
 
@@ -214,6 +244,10 @@ class MotionWorkflowCreateComplexWorkflowAction(CreateAction):
             MotionStateCreateAction,
             action_data,
         )
+        first_state_id = action_results[0]["id"]  # type: ignore
+        # Set first_state_id on workflow before it's written
+        instance["first_state_id"] = first_state_id
+
         from_to: tuple[tuple[int, tuple[int]]] = (  # type: ignore
             (0, (1, 5)),
             (1, (2, 5, 9)),

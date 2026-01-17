@@ -35,8 +35,22 @@ class CreateActionWithDependencies(CreateAction):
                 self, special_action_data_method_name, self.get_dependent_action_data
             )
             action_data = action_data_method(instance, ActionClass)
-            self.execute_other_action(ActionClass, action_data)
+            action_results = self.execute_other_action(ActionClass, action_data)
+            # Allow subclasses to update instance with results from dependencies
+            self.handle_dependency_result(instance, ActionClass, action_results)
         return instance
+
+    def handle_dependency_result(
+        self,
+        instance: dict[str, Any],
+        ActionClass: type[Action],
+        action_results: list[dict[str, Any]] | None,
+    ) -> None:
+        """
+        Handle results from a dependency action. Override in subclass to
+        update instance with IDs from created dependencies.
+        """
+        pass
 
     def check_dependant_action_execution(
         self, instance: dict[str, Any], CreateActionClass: type[Action]

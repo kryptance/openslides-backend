@@ -55,6 +55,7 @@ class MotionCreateBase(
             data = {
                 "motion_id": instance["id"],
                 "meeting_user_id": meeting_user_id,
+                "meeting_id": instance["meeting_id"],  # Pass directly to avoid DB lookup
                 "weight": weight,
             }
             weight += 1
@@ -72,6 +73,7 @@ class MotionCreateBase(
                     {
                         "motion_id": instance["id"],
                         "meeting_user_id": meeting_user_id,
+                        "meeting_id": instance["meeting_id"],  # Pass directly to avoid DB lookup
                     }
                     for meeting_user_id in supporter_ids
                 ],

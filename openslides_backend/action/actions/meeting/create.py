@@ -206,14 +206,18 @@ class MeetingCreate(
             self.execute_other_action(MeetingUserCreate, action_data)
         self.apply_instance(instance)
 
+        # Pass default_time directly since meeting isn't in DB yet
+        default_time = instance.get("projector_countdown_default_time", 60)
         action_data_countdowns = [
             {
                 "title": _("Speaking time"),
                 "meeting_id": instance["id"],
+                "default_time": default_time,
             },
             {
                 "title": _("Voting"),
                 "meeting_id": instance["id"],
+                "default_time": default_time,
             },
         ]
         action_results = self.execute_other_action(
@@ -261,6 +265,22 @@ class MeetingCreate(
                 }
             ]
         return []
+
+    def handle_dependency_result(
+        self,
+        instance: dict[str, Any],
+        ActionClass: type[Action],
+        action_results: list[dict[str, Any]] | None,
+    ) -> None:
+        """Set workflow IDs on meeting from dependency results."""
+        if ActionClass == MotionWorkflowCreateSimpleWorkflowAction and action_results:
+            # The simple workflow sets default_workflow_meeting_id
+            # Set the reverse relation directly on the meeting instance
+            instance["motions_default_workflow_id"] = action_results[0]["id"]
+            instance["motions_default_amendment_workflow_id"] = action_results[0]["id"]
+        elif ActionClass == ProjectorCreateAction and action_results:
+            # Set reference projector
+            instance["reference_projector_id"] = action_results[0]["id"]
 
     def set_defaults(self, instance: dict[str, Any]) -> dict[str, Any]:
         for field in self.model.get_fields():

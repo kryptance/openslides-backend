@@ -3,7 +3,6 @@ from typing import Any
 from ...services.database.interface import Database, PartialModel
 from ...shared.exceptions import ActionException
 from ...shared.filters import And, Filter, FilterOperator
-from ...shared.patterns import fqid_from_collection_and_id
 
 
 def get_meeting_mediafile_filter(meeting_id: int, mediafile_id: int) -> Filter:
@@ -49,10 +48,10 @@ def get_meeting_mediafile_id_or_create_payload(
     if id_:
         return id_
     mediafile = datastore.get(
-        fqid_from_collection_and_id("mediafile", mediafile_id),
+        "mediafile", mediafile_id,
         ["parent_id", "published_to_meetings_in_organization_id"],
         lock_result=lock_result,
-    )
+    ) or {}
     if not mediafile.get("published_to_meetings_in_organization_id"):
         raise ActionException(
             "No meeting_mediafile creation possible: Mediafile is not published."
@@ -75,10 +74,10 @@ def find_meeting_mediafile_generate_implicit(
     if result[0]:
         return result
     meeting = datastore.get(
-        fqid_from_collection_and_id("meeting", meeting_id),
+        "meeting", meeting_id,
         ["admin_group_id"],
         lock_result=False,
-    )
+    ) or {}
     fake_meeting_mediafile = {
         "meeting_id": meeting_id,
         "mediafile_id": mediafile_id,

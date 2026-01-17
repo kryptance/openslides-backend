@@ -23,6 +23,10 @@ class CreateActionWithInferredMeetingMixin(CreateAction):
         return instance
 
     def get_meeting_id(self, instance: dict[str, Any]) -> int:
+        # Allow passing meeting_id directly to avoid reading from DB
+        if "meeting_id" in instance:
+            return instance["meeting_id"]
+
         field = self.model.get_field(self.relation_field_for_meeting)
         assert isinstance(field, BaseRelationField)
         id = instance[self.relation_field_for_meeting]
