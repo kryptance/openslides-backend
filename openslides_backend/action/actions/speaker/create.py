@@ -1,7 +1,6 @@
 from typing import Any
 
 from openslides_backend.action.mixins.singular_action_mixin import SingularActionMixin
-from openslides_backend.services.database.commands import GetManyRequest
 
 from ....models.models import Speaker
 from ....permissions.permission_helper import has_perm
@@ -373,7 +372,7 @@ class SpeakerCreateAction(
             and los.get("closed")
             and user_id in (self.user_id, None)
             and not has_perm(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 Permissions.ListOfSpeakers.CAN_MANAGE,
                 meeting_id,
@@ -446,6 +445,6 @@ class SpeakerCreateAction(
             if meeting_user.get("user_id") == self.user_id and not len(restricted):
                 permission = Permissions.ListOfSpeakers.CAN_BE_SPEAKER
 
-        if has_perm(self.datastore, self.user_id, permission, meeting_id):
+        if has_perm(self.sql, self.user_id, permission, meeting_id):
             return
         raise MissingPermission(permission)

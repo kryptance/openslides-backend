@@ -76,7 +76,7 @@ class UserTogglePresenceByNumber(UpdateAction, CheckForArchivedMeetingMixin):
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.User.CAN_UPDATE,
             instance["meeting_id"],
@@ -90,13 +90,13 @@ class UserTogglePresenceByNumber(UpdateAction, CheckForArchivedMeetingMixin):
         ) or {}
         if not meeting.get("locked_from_inside"):
             if has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 OrganizationManagementLevel.CAN_MANAGE_USERS,
             ):
                 return
             if has_committee_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 meeting["committee_id"],
             ):

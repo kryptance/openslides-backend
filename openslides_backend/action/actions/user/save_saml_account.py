@@ -398,7 +398,7 @@ class UserSaveSamlAccount(
         """updates meeting users with groups and structure level relations from database"""
         for meeting_id, meeting_user in meeting_users.items():
             if meeting_user_db := get_meeting_user(
-                self.datastore,
+                self.sql,
                 meeting_id,
                 user_id,
                 ["id", "group_ids", "structure_level_ids"],

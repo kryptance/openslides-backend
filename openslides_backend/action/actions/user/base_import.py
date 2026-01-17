@@ -21,12 +21,12 @@ class BaseUserImport(BaseImportAction):
     def check_permissions(self, instance: dict[str, Any]) -> None:
         super().check_permissions(instance)
 
-        permstore = PermissionVarStore(self.datastore, self.user_id)
+        permstore = PermissionVarStore(self.sql, self.user_id)
         self.permission_check = CreateUpdatePermissionsFailingFields(
             self.user_id,
             permstore,
             self.services,
-            self.datastore,
+            self.sql,
             self.relation_manager,
             self.logging,
             self.env,
@@ -215,7 +215,7 @@ class BaseUserImport(BaseImportAction):
 
     def setup_lookups(self) -> None:
         self.username_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (entry["username"]["value"], entry)
@@ -231,7 +231,7 @@ class BaseUserImport(BaseImportAction):
             ],
         )
         self.saml_id_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (entry["saml_id"]["value"], entry)
@@ -241,7 +241,7 @@ class BaseUserImport(BaseImportAction):
             field="saml_id",
         )
         self.member_number_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (entry["member_number"]["value"], entry)

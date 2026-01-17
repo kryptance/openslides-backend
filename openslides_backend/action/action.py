@@ -223,7 +223,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         if self.permission:
             if isinstance(self.permission, OrganizationManagementLevel):
                 if has_organization_management_level(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     cast(OrganizationManagementLevel, self.permission),
                 ):
@@ -238,7 +238,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             else:
                 meeting_id = self.get_meeting_id(instance)
                 if has_perm(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     cast(Permission, self.permission),
                     meeting_id,
@@ -262,11 +262,10 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             raise ActionException(
                 f"get meeting failed Action: {self.name}. Perhaps you want to use skip_archived_meeting_checks = True attribute"
             )
-        gmr = GetManyRequest(
+        meetings = self.sql.get_many(
             "meeting", meeting_ids, ["id", "is_active_in_organization_id", "name"]
-        )
-        gm_result = self.datastore.get_many([gmr], lock_result=False)
-        for meeting in gm_result.get("meeting", {}).values():
+        ) if meeting_ids else {}
+        for meeting in meetings.values():
             if not meeting.get("is_active_in_organization_id"):
                 raise ActionException(
                     f'Meeting {meeting.get("name", "")}/{meeting["id"]} cannot be changed, because it is archived.'
@@ -281,7 +280,7 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
 
     def get_meeting_id(self, instance: dict[str, Any]) -> int:
         """
-        Returns the meeting_id, either directly from the instance or from the datastore.
+        Returns the meeting_id, either directly from the instance or from the database.
         Must be overwritten if no meeting_id is present in either!
         """
         if instance.get("meeting_id"):
@@ -293,11 +292,11 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             identifier = "id"
             if self.permission_id:
                 identifier = self.permission_id
-            db_instance = self.datastore.get(
-                fqid_from_collection_and_id(model.collection, instance[identifier]),
+            db_instance = self.sql.get(
+                model.collection,
+                instance[identifier],
                 ["meeting_id"],
-                lock_result=False,
-            )
+            ) or {}
             return db_instance["meeting_id"]
 
     @original_instances
@@ -406,7 +405,6 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
         )
         if fields:
             event["fields"] = fields
-            self.datastore.apply_changed_model(fqid, fields)
         if list_fields:
             event["list_fields"] = list_fields
         return event
@@ -455,8 +453,8 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
                     if fqid.split("/")[0] in HISTORY_MODELS
                 }
                 if len(information):
-                    position_id = self.datastore.reserve_id("history_position")
-                    entry_ids = self.datastore.reserve_ids(
+                    position_id = self.sql.reserve_id("history_position")
+                    entry_ids = self.sql.reserve_ids(
                         "history_entry", len(information)
                     )
                     deleted_fqids: set[str] = {
@@ -478,14 +476,13 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
                         collection_to_ids[collection_from_fqid(fqid)].append(
                             id_from_fqid(fqid)
                         )
-                    data = self.datastore.get_many(
-                        [
-                            GetManyRequest(collection, ids, ["meeting_id"])
-                            for collection, ids in collection_to_ids.items()
-                            if model_registry[collection]().try_get_field("meeting_id")
-                        ],
-                        use_changed_models=False,
-                    )
+                    # Gather meeting_ids from all collections that have meeting_id field
+                    data: dict[str, dict[int, dict[str, Any]]] = {}
+                    for collection, ids in collection_to_ids.items():
+                        if model_registry[collection]().try_get_field("meeting_id"):
+                            data[collection] = self.sql.get_many(
+                                collection, ids, ["meeting_id"]
+                            ) if ids else {}
                     create_events = calculate_history_event_payloads(
                         self.user_id,
                         information,
@@ -575,20 +572,15 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
     ) -> list[dict[str, Any]]:
         if not instances:
             instances = self.instances
-        # if any field is missing in any instance, we need to access the datastore
+        # if any field is missing in any instance, we need to access the database
         if any(not instance.get(field) for field in fields for instance in instances):
-            result = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        self.model.collection,
-                        [instance["id"] for instance in instances],
-                        fields,
-                    )
-                ],
-                lock_result=False,
-                use_changed_models=False,
-            )
-            return list(result.get(self.model.collection, {}).values())
+            ids = [instance["id"] for instance in instances]
+            result = self.sql.get_many(
+                self.model.collection,
+                ids,
+                fields,
+            ) if ids else {}
+            return list(result.values())
         else:
             return instances
 
@@ -631,13 +623,11 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
 
     def apply_event(self, event: Event) -> None:
         """
-        Applies the given event to the changed_models in the datastore.
+        No-op: With direct SQL access, events are applied directly to the database
+        in the respective action classes. This method is kept for compatibility
+        with the event-based write request building.
         """
-        if event["type"] in (EventType.Create, EventType.Update):
-            if fields := event.get("fields"):
-                self.datastore.apply_changed_model(event["fqid"], fields)
-        elif event["type"] == EventType.Delete:
-            self.datastore.apply_changed_model(event["fqid"], DeletedModel())
+        pass
 
     def validate_write_request(self, write_request: WriteRequest) -> None:
         """
@@ -714,14 +704,15 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
             fields = [field.own_field_name]
             for equal_field in field.equal_fields:
                 if not (own_equal_field_value := instance.get(equal_field)):
-                    fqid = fqid_from_collection_and_id(
-                        self.model.collection, instance["id"]
-                    )
-                    db_instance = self.datastore.get(
-                        fqid,
+                    db_instance = self.sql.get(
+                        self.model.collection,
+                        instance["id"],
                         [equal_field],
-                    )
+                    ) or {}
                     if not (own_equal_field_value := db_instance.get(equal_field)):
+                        fqid = fqid_from_collection_and_id(
+                            self.model.collection, instance["id"]
+                        )
                         raise ActionException(
                             f"{fqid} has no value for the field {equal_field}"
                         )
@@ -731,14 +722,17 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
                     )
                     if equal_field == "meeting_id":
                         assert_belongs_to_meeting(
-                            self.datastore, fqids, own_equal_field_value
+                            self.sql, fqids, own_equal_field_value
                         )
                     else:
                         for fqid in fqids:
-                            related_instance = self.datastore.get(
-                                fqid,
+                            fqid_collection = collection_from_fqid(fqid)
+                            fqid_id = id_from_fqid(fqid)
+                            related_instance = self.sql.get(
+                                fqid_collection,
+                                fqid_id,
                                 [equal_field],
-                            )
+                            ) or {}
                             if str(related_instance.get(equal_field)) != str(
                                 own_equal_field_value
                             ):
@@ -754,9 +748,11 @@ class Action(BaseServiceProvider, metaclass=SchemaProvider):
     def apply_instance(
         self, instance: dict[str, Any], fqid: FullQualifiedId | None = None
     ) -> None:
-        if not fqid:
-            fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
-        self.datastore.apply_changed_model(fqid, instance)
+        """
+        No-op: With direct SQL access, changes are applied directly to the database
+        in the respective action classes. This method is kept for compatibility.
+        """
+        pass
 
     def execute_other_action(
         self,

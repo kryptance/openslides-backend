@@ -69,7 +69,7 @@ class GetUsers(BasePresenter):
 
     def check_permissions(self) -> None:
         if not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             raise MissingPermission(OrganizationManagementLevel.CAN_MANAGE_USERS)
 
@@ -85,7 +85,7 @@ class GetUsers(BasePresenter):
                 fields.append(name)
 
         return list(
-            self.datastore.get_all(
+            self.sql.get_all(
                 "user",
                 fields,
             ).values()

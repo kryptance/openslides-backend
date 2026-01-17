@@ -26,7 +26,7 @@ class GroupMixin(CheckUniqueInContextMixin, Action):
         super().check_permissions(instance)
         # external id is only allowed for admins
         if "external_id" in instance and not is_admin(
-            self.datastore,
+            self.sql,
             self.user_id,
             self.get_meeting_id(instance),
         ):

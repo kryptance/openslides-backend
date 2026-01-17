@@ -79,7 +79,7 @@ class MotionSetStateAction(
         timestamp = datetime.now(ZoneInfo("UTC"))
         instance["last_modified"] = timestamp
         if not motion.get("workflow_timestamp"):
-            set_workflow_timestamp_helper(self.datastore, instance, timestamp)
+            set_workflow_timestamp_helper(self.sql, instance, timestamp)
         return instance
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
@@ -95,7 +95,7 @@ class MotionSetStateAction(
             lock_result=False,
         ) or {}
         if has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Motion.CAN_MANAGE_METADATA,
             motion["meeting_id"],
@@ -104,7 +104,7 @@ class MotionSetStateAction(
             return
 
         if self.is_submitter(motion.get("submitter_ids", [])) and has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Motion.CAN_SEE,
             motion["meeting_id"],

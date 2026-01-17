@@ -23,7 +23,7 @@ class ParticipantCommon(BaseImportJsonUploadAction, CheckLockOutPermissionMixin)
     meeting_id: int
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        permstore = PermissionVarStore(self.datastore, self.user_id)
+        permstore = PermissionVarStore(self.sql, self.user_id)
         if self.meeting_id not in permstore.user_meetings:
             meeting = self.sql.get(
                 "meeting",

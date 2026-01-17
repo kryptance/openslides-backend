@@ -98,7 +98,7 @@ class MeetingCreate(
         if organization.get(
             "require_duplicate_from"
         ) and not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             raise ActionException(
                 "You cannot create a new meeting, because you need to use a template."

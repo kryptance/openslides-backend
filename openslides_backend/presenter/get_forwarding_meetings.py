@@ -6,7 +6,6 @@ import fastjsonschema
 from ..permissions.permission_helper import has_perm
 from ..permissions.permissions import Permissions
 from ..shared.exceptions import PermissionDenied, PresenterException
-from ..shared.patterns import fqid_from_collection_and_id
 from ..shared.schema import required_id_schema, schema_version
 from .base import BasePresenter
 from .presenter import register_presenter
@@ -36,7 +35,7 @@ class GetForwardingMeetings(BasePresenter):
     def get_result(self) -> Any:
         # check permission
         if not has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Motion.CAN_FORWARD,
             self.data["meeting_id"],
@@ -45,33 +44,37 @@ class GetForwardingMeetings(BasePresenter):
             msg += f" Missing permission: {Permissions.Motion.CAN_FORWARD}"
             raise PermissionDenied(msg)
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", self.data["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            self.data["meeting_id"],
             ["committee_id", "is_active_in_organization_id", "name"],
-        )
+        ) or {}
         if not meeting.get("is_active_in_organization_id"):
             raise PresenterException(
                 "Your sender meeting is an archived meeting, which can not forward motions."
             )
 
-        committee = self.datastore.get(
-            fqid_from_collection_and_id("committee", meeting["committee_id"]),
+        committee = self.sql.get(
+            "committee",
+            meeting["committee_id"],
             ["forward_to_committee_ids"],
-        )
+        ) or {}
 
         result = []
         for forward_to_committee_id in committee.get("forward_to_committee_ids", []):
-            forward_to_committee = self.datastore.get(
-                fqid_from_collection_and_id("committee", forward_to_committee_id),
+            forward_to_committee = self.sql.get(
+                "committee",
+                forward_to_committee_id,
                 ["meeting_ids", "name", "default_meeting_id"],
-            )
+            ) or {}
 
             meeting_result = []
             for meeting_id2 in forward_to_committee.get("meeting_ids", []):
-                meeting2 = self.datastore.get(
-                    fqid_from_collection_and_id("meeting", meeting_id2),
+                meeting2 = self.sql.get(
+                    "meeting",
+                    meeting_id2,
                     ["name", "is_active_in_organization_id", "start_time", "end_time"],
-                )
+                ) or {}
                 if meeting2.get("is_active_in_organization_id"):
                     meeting_result.append(
                         {

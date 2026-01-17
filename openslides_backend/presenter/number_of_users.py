@@ -2,8 +2,6 @@ from typing import Any
 
 import fastjsonschema
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
-
 from ..shared.filters import FilterOperator
 from ..shared.schema import schema_version
 from .base import BasePresenter
@@ -31,15 +29,16 @@ class NumberOfUsers(BasePresenter):
     schema = number_of_users_schema
 
     def get_result(self) -> Any:
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID,
+        organization = self.sql.get(
+            "organization",
+            1,
             ["limit_of_users"],
-        )
+        ) or {}
         limit_of_users = organization.get("limit_of_users")
         if limit_of_users == 0:
             return {"possible": True}
         filter_ = FilterOperator("is_active", "=", True)
-        count_of_users = self.datastore.count("user", filter_)
+        count_of_users = self.sql.count("user", filter_)
         if (
             count_of_users + self.data["number_of_users_to_add_or_activate"]
             > limit_of_users

@@ -1,6 +1,7 @@
+from typing import Any
+
 from openslides_backend.action.mixins.meeting_user_helper import get_meeting_user
 
-from ...services.database.interface import Database
 from ...shared.exceptions import ActionException
 from ...shared.patterns import (
     KEYSEPARATOR,
@@ -11,7 +12,7 @@ from ...shared.patterns import (
 
 
 def assert_belongs_to_meeting(
-    datastore: Database,
+    sql: Any,
     fqids: FullQualifiedId | list[FullQualifiedId],
     meeting_id: int,
 ) -> None:
@@ -24,36 +25,41 @@ def assert_belongs_to_meeting(
             if id_from_fqid(fqid) != meeting_id:
                 errors.add(str(fqid))
         elif collection_from_fqid(fqid) == "user":
-            instance = datastore.get(
-                fqid,
+            instance = sql.get(
+                "user",
+                id_from_fqid(fqid),
                 ["meeting_ids"],
-                lock_result=False,
-                raise_exception=False,
-            )
+            ) or {}
             if meeting_id in instance.get("meeting_ids", []):
                 continue
-            # try on datastore whether minimum 1 group-relation exist in meeting_user
+            # try on sql whether minimum 1 group-relation exist in meeting_user
             meeting_user = get_meeting_user(
-                datastore, meeting_id, id_from_fqid(fqid), ["group_ids"]
+                sql, meeting_id, id_from_fqid(fqid), ["group_ids"]
             )
             if meeting_user and meeting_user.get("group_ids"):
                 continue
             errors.add(str(fqid))
         elif collection_from_fqid(fqid) == "mediafile":
-            mediafile = datastore.get(fqid, ["owner_id"], lock_result=False)
-            collection, id_ = mediafile["owner_id"].split(KEYSEPARATOR)
-            if collection == "meeting":
-                if int(id_) != meeting_id:
+            mediafile = sql.get(
+                "mediafile",
+                id_from_fqid(fqid),
+                ["owner_id"],
+            ) or {}
+            if owner_id := mediafile.get("owner_id"):
+                collection, id_ = owner_id.split(KEYSEPARATOR)
+                if collection == "meeting":
+                    if int(id_) != meeting_id:
+                        errors.add(str(fqid))
+                else:
                     errors.add(str(fqid))
             else:
                 errors.add(str(fqid))
         else:
-            instance = datastore.get(
-                fqid,
+            instance = sql.get(
+                collection_from_fqid(fqid),
+                id_from_fqid(fqid),
                 ["meeting_id"],
-                lock_result=False,
-                raise_exception=False,
-            )
+            ) or {}
             if instance.get("meeting_id") != meeting_id:
                 errors.add(str(fqid))
 

@@ -100,7 +100,7 @@ class UserCreate(
                 instance["default_password"] = get_random_password()
             self.reset_password(instance)
         instance["organization_id"] = ONE_ORGANIZATION_ID
-        check_gender_exists(self.datastore, instance)
+        check_gender_exists(self.sql, instance)
         if instance.get("external") and instance.get("home_committee_id"):
             raise ActionException(
                 "Cannot set external to true and set a home committee at the same time."
@@ -113,7 +113,7 @@ class UserCreate(
         result = {"id": instance["id"]}
         if self.meeting_id:
             meeting_user = get_meeting_user(
-                self.datastore, self.meeting_id, instance["id"], ["id"]
+                self.sql, self.meeting_id, instance["id"], ["id"]
             )
             if meeting_user and meeting_user.get("id"):
                 result["meeting_user_id"] = meeting_user["id"]

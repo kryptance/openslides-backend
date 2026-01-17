@@ -210,7 +210,7 @@ class ActionHandler(BaseHandler):
         """
         write_requests: list[WriteRequest] = []
         action_response_results: ActionsResponseResults = []
-        relation_manager = RelationManager(self.datastore, self.sql)
+        relation_manager = RelationManager(self.sql)
         action_name_list = []
         for i, element in enumerate(payload):
             with make_span(self.env, f"parse action: {element['action']}"):
@@ -263,7 +263,7 @@ class ActionHandler(BaseHandler):
         ):
             raise View400Exception(f"Action {action_name} does not exist.")
         if not relation_manager:
-            relation_manager = RelationManager(self.datastore, self.sql)
+            relation_manager = RelationManager(self.sql)
 
         self.logger.info(f"Performing action {action_name}.")
         action = ActionClass(

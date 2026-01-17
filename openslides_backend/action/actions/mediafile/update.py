@@ -53,7 +53,7 @@ class MediafileUpdate(MediafileMixin, UpdateAction, MediafileCalculatedFieldsMix
                     instance["is_public"],
                     instance["inherited_access_group_ids"],
                 ) = calculate_inherited_groups_helper_with_parent_id(
-                    self.datastore,
+                    self.sql,
                     instance.get("access_group_ids"),
                     mediafile.get("parent_id"),
                     meeting_id,
@@ -82,7 +82,7 @@ class MediafileUpdate(MediafileMixin, UpdateAction, MediafileCalculatedFieldsMix
                     m_mediafile[field] = instance.pop(field)
             if len(m_mediafile):
                 m_id, _ = find_meeting_mediafile(
-                    self.datastore, meeting_id, instance["id"], lock_result=False
+                    self.sql, meeting_id, instance["id"], lock_result=False
                 )
                 if m_id:
                     self.execute_other_action(

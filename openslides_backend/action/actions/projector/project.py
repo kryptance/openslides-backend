@@ -54,7 +54,7 @@ class ProjectorProject(WeightMixin, SingularActionMixin, UpdateAction):
             meeting_member_check_necessary = True
             if content_object_collection == "mediafile":
                 meeting_mediafile = get_meeting_mediafile_id_or_create_payload(
-                    self.datastore, meeting_id, content_object_id, lock_result=False
+                    self.sql, meeting_id, content_object_id, lock_result=False
                 )
                 if not isinstance(meeting_mediafile, int):
                     create_result = self.execute_other_action(
@@ -73,7 +73,7 @@ class ProjectorProject(WeightMixin, SingularActionMixin, UpdateAction):
                 )
             if meeting_member_check_necessary:
                 assert_belongs_to_meeting(
-                    self.datastore,
+                    self.sql,
                     [fqid_content_object]
                     + [
                         fqid_from_collection_and_id("projector", id)

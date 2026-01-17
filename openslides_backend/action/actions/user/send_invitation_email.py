@@ -226,7 +226,7 @@ class UserSendInvitationMail(UpdateAction):
         )
         if meeting_id:
             m_user = get_meeting_user(
-                self.datastore,
+                self.sql,
                 meeting_id,
                 user_id,
                 ["structure_level_ids", "group_ids"],
@@ -327,14 +327,14 @@ class UserSendInvitationMail(UpdateAction):
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if instance.get("meeting_id") and has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.User.CAN_UPDATE,
             instance["meeting_id"],
         ):
             return
         if not instance.get("meeting_id") and has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             return
         if instance.get("meeting_id"):

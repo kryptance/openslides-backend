@@ -1,6 +1,9 @@
-from typing import TypedDict, Union
+from typing import Any, TypedDict, Union
 
 from ...shared.patterns import FullQualifiedField, Identifier, IdentifierList
+
+# Type alias for a partial model dictionary
+PartialModel = dict[str, Any]
 
 
 class FieldUpdateElement(TypedDict):

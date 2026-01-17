@@ -89,7 +89,7 @@ class MeetingClone(MeetingImport):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         meeting_json = export_meeting(
-            self.datastore, instance["meeting_id"], True, True
+            self.sql, instance["meeting_id"], True, True
         )
         instance["meeting"] = meeting_json
         additional_user_ids = instance.pop("user_ids", None) or []
@@ -266,9 +266,6 @@ class MeetingClone(MeetingImport):
             return meeting_user["id"]
         else:
             meeting_user_id = self.create_meeting_user(meeting_id, user_id)
-            self.datastore.get_changed_model("meeting_user", meeting_user_id).pop(
-                "meta_new", None
-            )
             return meeting_user_id
 
     def _update_default_and_admin_group(
@@ -288,14 +285,18 @@ class MeetingClone(MeetingImport):
         meeting_user_ids.update(additional_meeting_user_ids)
         group_id = group_in_instance["id"]
         for meeting_user_id in additional_meeting_user_ids:
-            meeting_user = cast(
-                dict[str, Any],
-                self.datastore.get_changed_model("meeting_user", meeting_user_id),
-            )
-            group_ids = meeting_user.get("group_ids", [])
+            # Read meeting_user from database instead of changed_models cache
+            meeting_user = self.sql.get(
+                "meeting_user",
+                meeting_user_id,
+                ["id", "group_ids", "user_id", "meeting_id"],
+            ) or {}
+            group_ids = list(meeting_user.get("group_ids", []) or [])
             if group_id not in group_ids:
                 group_ids.append(group_id)
                 meeting_user["group_ids"] = group_ids
+                # Update in database
+                self.sql.update("meeting_user", meeting_user_id, {"group_ids": group_ids})
             meeting_users_in_instance[str(meeting_user_id)] = meeting_user
         group_in_instance["meeting_user_ids"] = list(meeting_user_ids)
 

@@ -30,7 +30,7 @@ class ChatMessageDelete(DeleteAction):
             lock_result=False,
         ) or {}
         if meeting_user.get("user_id") != self.user_id and not has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Chat.CAN_MANAGE,
             chat_message["meeting_id"],

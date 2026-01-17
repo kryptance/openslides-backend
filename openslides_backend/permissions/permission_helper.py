@@ -1,42 +1,41 @@
+from typing import Any
+
 from openslides_backend.action.mixins.meeting_user_helper import (
     get_groups_from_meeting_user,
     get_meeting_user,
 )
 
-from ..services.database.commands import GetManyRequest
-from ..services.database.interface import Database
 from ..shared.exceptions import ActionException, PermissionDenied
-from ..shared.patterns import fqid_from_collection_and_id
 from .management_levels import OrganizationManagementLevel
 from .permissions import Permission, Permissions, permission_parents
 
 
 def has_perm(
-    datastore: Database, user_id: int, permission: Permission, meeting_id: int
+    sql: Any, user_id: int, permission: Permission, meeting_id: int
 ) -> bool:
-    meeting = datastore.get(
-        fqid_from_collection_and_id("meeting", meeting_id),
+    meeting = sql.get(
+        "meeting",
+        meeting_id,
         [
             "anonymous_group_id",
             "enable_anonymous",
             "locked_from_inside",
             "committee_id",
         ],
-        lock_result=False,
-    )
+    ) or {}
     not_locked_from_editing = not meeting.get("locked_from_inside")
     # anonymous cannot be fetched from db
     if user_id > 0:
         # committeeadmins, orgaadmins and superadmins have all permissions if the meeting isn't locked from the inside
         if not_locked_from_editing and has_committee_management_level(
-            datastore,
+            sql,
             user_id,
             meeting["committee_id"],
         ):
             return True
 
         meeting_user = get_meeting_user(
-            datastore, meeting_id, user_id, ["group_ids", "locked_out"]
+            sql, meeting_id, user_id, ["group_ids", "locked_out"]
         )
         if not meeting_user:
             group_ids = []
@@ -58,13 +57,12 @@ def has_perm(
     else:
         return False
 
-    gmr = GetManyRequest(
+    groups = sql.get_many(
         "group",
         group_ids,
         ["permissions", "admin_group_for_meeting_id"],
-    )
-    result = datastore.get_many([gmr], lock_result=False)
-    for group in result["group"].values():
+    ) if group_ids else {}
+    for group in groups.values():
         # admins implicitly have all permissions
         if group.get("admin_group_for_meeting_id") == meeting_id:
             return True
@@ -91,16 +89,17 @@ def is_child_permission(child: Permission, parent: Permission) -> bool:
 
 
 def has_organization_management_level(
-    datastore: Database,
+    sql: Any,
     user_id: int,
     expected_level: OrganizationManagementLevel,
 ) -> bool:
     """Checks wether a user has the minimum necessary OrganizationManagementLevel"""
     if user_id > 0:
-        user = datastore.get(
-            fqid_from_collection_and_id("user", user_id),
+        user = sql.get(
+            "user",
+            user_id,
             ["organization_management_level"],
-        )
+        ) or {}
         return expected_level <= OrganizationManagementLevel(
             user.get("organization_management_level", "")
         )
@@ -108,7 +107,7 @@ def has_organization_management_level(
 
 
 def get_failing_committee_management_levels(
-    datastore: Database,
+    sql: Any,
     user_id: int,
     committee_ids: list[int],
 ) -> list[int]:
@@ -117,12 +116,11 @@ def get_failing_committee_management_levels(
     in the list and returns the ids of all that fail.
     """
     if user_id > 0:
-        user = datastore.get(
-            fqid_from_collection_and_id("user", user_id),
+        user = sql.get(
+            "user",
+            user_id,
             ["organization_management_level", "committee_management_ids"],
-            lock_result=False,
-            use_changed_models=False,
-        )
+        ) or {}
         if user.get("organization_management_level") in (
             OrganizationManagementLevel.SUPERADMIN,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
@@ -132,9 +130,9 @@ def get_failing_committee_management_levels(
             user.get("committee_management_ids", [])
         )
         if not_trivial:
-            committees = datastore.get_many(
-                [GetManyRequest("committee", list(not_trivial), ["all_parent_ids"])]
-            )["committee"]
+            committees = sql.get_many(
+                "committee", list(not_trivial), ["all_parent_ids"]
+            )
             return [
                 id_
                 for id_, committee in committees.items()
@@ -147,7 +145,7 @@ def get_failing_committee_management_levels(
 
 
 def has_committee_management_level(
-    datastore: Database,
+    sql: Any,
     user_id: int,
     committee_id: int,
 ) -> bool:
@@ -155,30 +153,31 @@ def has_committee_management_level(
     Checks whether a user is committee manager in the given committee.
     """
     if user_id > 0:
-        user = datastore.get(
-            fqid_from_collection_and_id("user", user_id),
+        user = sql.get(
+            "user",
+            user_id,
             ["organization_management_level", "committee_management_ids"],
-            lock_result=False,
-            use_changed_models=False,
-        )
+        ) or {}
         if user.get("organization_management_level") in (
             OrganizationManagementLevel.SUPERADMIN,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):
             return True
+        committee = sql.get(
+            "committee",
+            committee_id,
+            ["all_parent_ids"],
+        ) or {}
         if committee_id in user.get("committee_management_ids", []) or any(
             parent_id in user.get("committee_management_ids", [])
-            for parent_id in datastore.get(
-                fqid_from_collection_and_id("committee", committee_id),
-                ["all_parent_ids"],
-            ).get("all_parent_ids", [])
+            for parent_id in committee.get("all_parent_ids", [])
         ):
             return True
     return False
 
 
 def get_shared_committee_management_levels(
-    datastore: Database,
+    sql: Any,
     user_id: int,
     committee_ids: list[int],
 ) -> list[int]:
@@ -187,23 +186,23 @@ def get_shared_committee_management_levels(
     Returns a list where this is the case or all if the user is orga admin.
     """
     if user_id > 0:
-        user = datastore.get(
-            fqid_from_collection_and_id("user", user_id),
+        user = sql.get(
+            "user",
+            user_id,
             ["organization_management_level", "committee_management_ids"],
-            lock_result=False,
-            use_changed_models=False,
-        )
+        ) or {}
         if user.get("organization_management_level") in (
             OrganizationManagementLevel.SUPERADMIN,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):
             return committee_ids
+        committees = sql.get_many(
+            "committee", committee_ids, ["all_parent_ids"]
+        ) if committee_ids else {}
         return list(
             {
                 id_
-                for committee_id, committee in datastore.get_many(
-                    [GetManyRequest("committee", committee_ids, ["all_parent_ids"])]
-                )["committee"].items()
+                for committee_id, committee in committees.items()
                 for id_ in [committee_id, *committee.get("all_parent_ids", [])]
             }.intersection(user.get("committee_management_ids", []))
         )
@@ -225,18 +224,18 @@ def filter_surplus_permissions(permission_list: list[Permission]) -> list[Permis
     return reduced_permissions
 
 
-def is_admin(datastore: Database, user_id: int, meeting_id: int) -> bool:
-    meeting = datastore.get(
-        fqid_from_collection_and_id("meeting", meeting_id),
+def is_admin(sql: Any, user_id: int, meeting_id: int) -> bool:
+    meeting = sql.get(
+        "meeting",
+        meeting_id,
         ["admin_group_id", "locked_from_inside", "committee_id"],
-        lock_result=False,
-    )
+    ) or {}
     if not meeting.get("locked_from_inside") and has_committee_management_level(
-        datastore, user_id, meeting["committee_id"]
+        sql, user_id, meeting["committee_id"]
     ):
         return True
 
-    group_ids = get_groups_from_meeting_user(datastore, meeting_id, user_id)
+    group_ids = get_groups_from_meeting_user(sql, meeting_id, user_id)
     return bool(group_ids) and meeting["admin_group_id"] in group_ids
 
 

@@ -148,7 +148,7 @@ class MotionUpdate(
                 instance["state_id"] = workflow["first_state_id"]
                 instance["recommendation_id"] = None
                 if "workflow_timestamp" not in instance:
-                    set_workflow_timestamp_helper(self.datastore, instance, timestamp)
+                    set_workflow_timestamp_helper(self.sql, instance, timestamp)
 
         for prefix in ("recommendation", "state"):
             if f"{prefix}_extension" in instance:
@@ -186,13 +186,13 @@ class MotionUpdate(
 
         # check for can_manage, all allowed
         perm = Permissions.Motion.CAN_MANAGE
-        if has_perm(self.datastore, self.user_id, perm, motion["meeting_id"]):
+        if has_perm(self.sql, self.user_id, perm, motion["meeting_id"]):
             return
 
         # check for can_manage_metadata and whitelist
         perm = Permissions.Motion.CAN_MANAGE_METADATA
         allowed_fields = ["id"]
-        if has_perm(self.datastore, self.user_id, perm, motion["meeting_id"]):
+        if has_perm(self.sql, self.user_id, perm, motion["meeting_id"]):
             allowed_fields += [
                 "category_id",
                 "block_id",

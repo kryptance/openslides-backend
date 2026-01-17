@@ -9,7 +9,6 @@ from openslides_backend.shared.patterns import is_reserved_field
 from ..models.checker import Checker, CheckException
 from ..permissions.management_levels import OrganizationManagementLevel
 from ..permissions.permission_helper import has_organization_management_level
-from ..services.database.interface import Database
 from ..shared.exceptions import PermissionDenied
 from ..shared.schema import schema_version
 from .base import BasePresenter
@@ -26,8 +25,8 @@ check_database_schema = fastjsonschema.compile(
 )
 
 
-def check_everything(datastore: Database) -> None:
-    result = datastore.get_everything()
+def check_everything(sql: Any) -> None:
+    result = sql.get_everything()
     data: dict[str, Any] = {
         collection: {
             str(id): {
@@ -61,14 +60,14 @@ class CheckDatabaseAll(BasePresenter):
     def get_result(self) -> Any:
         # check permissions
         if not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.SUPERADMIN
+            self.sql, self.user_id, OrganizationManagementLevel.SUPERADMIN
         ):
             msg = "You are not allowed to perform presenter check_database."
             msg += f" Missing permission: {OrganizationManagementLevel.SUPERADMIN}"
             raise PermissionDenied(msg)
 
         try:
-            check_everything(self.datastore)
+            check_everything(self.sql)
             return {"ok": True}
         except CheckException as ce:
             return {"ok": False, "errors": str(ce)}

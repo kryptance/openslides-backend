@@ -8,7 +8,6 @@ from openslides_backend.action.mixins.meeting_user_helper import (
 
 from ..permissions.management_levels import OrganizationManagementLevel
 from ..permissions.permission_helper import has_organization_management_level
-from ..services.database.commands import GetManyRequest
 from ..shared.exceptions import MissingPermission
 from ..shared.filters import And, FilterOperator
 from ..shared.schema import schema_version
@@ -60,7 +59,7 @@ class SearchForIdByExternalId(BasePresenter):
         mapped_fields = ["id"]
         if is_group := self.data["collection"] == "group":
             mapped_fields.append("meeting_id")
-        filtered = self.datastore.filter(
+        filtered = self.sql.filter(
             self.data["collection"], filter_, mapped_fields
         )
         if is_group and len(filtered):
@@ -77,28 +76,25 @@ class SearchForIdByExternalId(BasePresenter):
         self, filtered: dict[int, dict[str, Any]]
     ) -> None:
         remove_group_ids: list[int] = []
-        meetings = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "meeting",
-                    list(
-                        {
-                            meeting_id
-                            for group in filtered.values()
-                            if (meeting_id := group.get("meeting_id"))
-                        }
-                    ),
-                    ["locked_from_inside", "group_ids"],
-                )
-            ],
+        meeting_ids = list(
+            {
+                meeting_id
+                for group in filtered.values()
+                if (meeting_id := group.get("meeting_id"))
+            }
+        )
+        meetings = self.sql.get_many(
+            "meeting",
+            meeting_ids,
+            ["locked_from_inside", "group_ids"],
             lock_result=False,
-        )["meeting"]
+        ) if meeting_ids else {}
         for group_id, group in filtered.items():
             if meetings.get(group.get("meeting_id", 0), {}).get(
                 "locked_from_inside"
             ) and not set(
                 get_groups_from_meeting_user(
-                    self.datastore, group["meeting_id"], self.user_id
+                    self.sql, group["meeting_id"], self.user_id
                 )
             ).intersection(
                 meetings[group["meeting_id"]].get("group_ids", [])
@@ -109,7 +105,7 @@ class SearchForIdByExternalId(BasePresenter):
 
     def check_permissions(self) -> None:
         if not has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):

@@ -9,7 +9,6 @@ from ....permissions.permission_helper import (
     has_committee_management_level,
     has_organization_management_level,
 )
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, MissingPermission
 from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
@@ -154,7 +153,7 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
     def check_permissions(self, instance: dict[str, Any]) -> None:
         self.check_forwarding_fields(instance)
         if has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):
@@ -201,7 +200,7 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
                 )
 
         if has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             instance["id"],
         ):

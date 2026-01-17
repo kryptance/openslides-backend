@@ -42,7 +42,7 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if (
             not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 OrganizationManagementLevel.CAN_MANAGE_USERS,
             )
@@ -55,7 +55,7 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
                 committee_id
                 for committee_id in committee_ids
                 if not has_committee_management_level(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     committee_id,
                 )

@@ -69,7 +69,7 @@ class CheckLockOutPermissionMixin(Action):
         if meeting_id and (user_id or user):
             db_instance = (
                 get_meeting_user(
-                    self.datastore,
+                    self.sql,
                     meeting_id,
                     user_id or cast(dict[str, Any], user)["id"],
                     ["locked_out", "group_ids", "meeting_id", "user_id"],

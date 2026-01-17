@@ -5,7 +5,6 @@ from typing import Any
 import simplejson as json
 from psycopg.types.json import Jsonb
 
-from ....services.database.interface import Database
 from ....shared.filters import And, FilterOperator
 from ....shared.html import get_text_from_html
 from ....shared.patterns import fqid_from_collection_and_id
@@ -47,12 +46,13 @@ class AmendmentParagraphHelper:
 
 
 def set_workflow_timestamp_helper(
-    datastore: Database, instance: dict[str, Any], timestamp: datetime
+    sql: Any, instance: dict[str, Any], timestamp: datetime
 ) -> None:
-    state = datastore.get(
-        fqid_from_collection_and_id("motion_state", instance["state_id"]),
+    state = sql.get(
+        "motion_state",
+        instance["state_id"],
         ["set_workflow_timestamp"],
-    )
+    ) or {}
     if state.get("set_workflow_timestamp"):
         instance["workflow_timestamp"] = timestamp
 

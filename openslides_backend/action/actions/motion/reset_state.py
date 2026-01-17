@@ -68,5 +68,5 @@ class MotionResetStateAction(UpdateAction, SetNumberMixin):
         timestamp = datetime.now(ZoneInfo("UTC"))
         instance["last_modified"] = timestamp
         instance["workflow_timestamp"] = None
-        set_workflow_timestamp_helper(self.datastore, instance, timestamp)
+        set_workflow_timestamp_helper(self.sql, instance, timestamp)
         return instance

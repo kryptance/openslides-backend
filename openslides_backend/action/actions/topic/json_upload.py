@@ -98,7 +98,7 @@ class TopicJsonUpload(BaseJsonUploadAction):
 
     def setup_lookups(self, data: list[dict[str, Any]], meeting_id: int) -> None:
         self.topic_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "topic",
             [(title, entry) for entry in data if (title := entry.get("title"))],
             field="title",

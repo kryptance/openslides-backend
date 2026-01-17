@@ -31,7 +31,7 @@ class CommitteeDeleteAction(DeleteAction):
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if not has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             instance["id"],
         ):

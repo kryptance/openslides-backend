@@ -25,7 +25,7 @@ class ListOfSpeakersUpdateAction(UpdateAction):
         if "moderator_notes" in instance:
             perm = Permissions.ListOfSpeakers.CAN_MANAGE_MODERATOR_NOTES
             if not has_perm(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 perm,
                 self.get_meeting_id(instance),

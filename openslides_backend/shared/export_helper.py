@@ -14,8 +14,6 @@ from ..models.fields import (
     RelationListField,
 )
 from ..models.models import Meeting
-from ..services.database.commands import GetManyRequest
-from ..services.database.interface import Database
 from .patterns import collection_from_fqid, fqid_from_collection_and_id, id_from_fqid
 
 FORBIDDEN_FIELDS = ["forwarded_motion_ids"]
@@ -30,7 +28,7 @@ HISTORY_FIELDS_PER_COLLECTION = {
 
 
 def export_meeting(
-    datastore: Database,
+    sql: Any,
     meeting_id: int,
     internal_target: bool = False,
     update_mediafiles: bool = False,
@@ -38,12 +36,11 @@ def export_meeting(
     export: dict[str, Any] = {}
 
     # fetch meeting
-    meeting = datastore.get(
-        fqid_from_collection_and_id("meeting", meeting_id),
+    meeting = sql.get(
+        "meeting",
+        meeting_id,
         list(get_fields_for_export("meeting") - set(FORBIDDEN_FIELDS)),
-        lock_result=False,
-        use_changed_models=False,
-    )
+    ) or {}
     for forbidden_field in FORBIDDEN_FIELDS + HISTORY_FIELDS_PER_COLLECTION["meeting"]:
         meeting.pop(forbidden_field, None)
 
@@ -55,19 +52,17 @@ def export_meeting(
 
     # fetch related models
     relation_fields = list(get_relation_fields())
-    get_many_requests = [
-        GetManyRequest(
-            field.get_target_collection(),
-            ids,
-            get_fields_for_export(field.get_target_collection()),
-        )
-        for field in relation_fields
-        if (ids := meeting.get(field.get_own_field_name()))
-    ]
-    if get_many_requests:
-        results = datastore.get_many(
-            get_many_requests, lock_result=False, use_changed_models=False
-        )
+    results: dict[str, dict[int, dict[str, Any]]] = {}
+    for field in relation_fields:
+        collection = field.get_target_collection()
+        ids = meeting.get(field.get_own_field_name())
+        if ids:
+            fields = list(get_fields_for_export(collection))
+            collection_results = sql.get_many(collection, ids, fields) if ids else {}
+            if collection_results:
+                results[collection] = collection_results
+
+    if results:
         # update_mediafiles_for_internal_calls
         if update_mediafiles and len(
             mediafile_ids := results.get("mediafile", {}).keys()
@@ -82,24 +77,18 @@ def export_meeting(
                 mm["mediafile_id"] for mm in mm_with_unknown_mediafiles.values()
             ]
             while next_file_ids:
-                unknown_mediafiles.update(
-                    datastore.get_many(
-                        [
-                            GetManyRequest(
-                                "mediafile",
-                                next_file_ids,
-                                [
-                                    "id",
-                                    "owner_id",
-                                    "published_to_meetings_in_organization_id",
-                                    "parent_id",
-                                    "child_ids",
-                                ],
-                            ),
-                        ],
-                        use_changed_models=False,
-                    )["mediafile"]
-                )
+                mediafile_results = sql.get_many(
+                    "mediafile",
+                    next_file_ids,
+                    [
+                        "id",
+                        "owner_id",
+                        "published_to_meetings_in_organization_id",
+                        "parent_id",
+                        "child_ids",
+                    ],
+                ) if next_file_ids else {}
+                unknown_mediafiles.update(mediafile_results)
                 next_file_ids = list(
                     {
                         parent_id
@@ -124,9 +113,6 @@ def export_meeting(
                     ) and parent_id not in results["mediafile"]:
                         mediafile = unknown_mediafiles[parent_id]
                         results["mediafile"][parent_id] = mediafile
-
-    else:
-        results = {}
 
     for field in relation_fields:
         collection = field.get_target_collection()
@@ -203,7 +189,7 @@ def export_meeting(
                     elif collection_from_fqid(entry[field_name]) == "meeting_user":
                         id_ = id_from_fqid(entry[field_name])
                         user_ids.add(results["meeting_user"][id_]["user_id"])
-    add_users(list(user_ids), export, meeting_id, datastore, internal_target)
+    add_users(list(user_ids), export, meeting_id, sql, internal_target)
 
     # Sort instances by id within each collection
     for collection, instances in export.items():
@@ -242,26 +228,20 @@ def add_users(
     user_ids: list[int],
     export_data: dict[str, Any],
     meeting_id: int,
-    datastore: Database,
+    sql: Any,
     internal_target: bool,
 ) -> None:
     if not user_ids:
         return
 
-    gmr = GetManyRequest(
+    users_data = sql.get_many(
         "user",
         user_ids,
-        get_fields_for_export("user"),
-    )
+        list(get_fields_for_export("user")),
+    ) if user_ids else {}
     users = remove_history_fields(
         "user",
-        remove_meta_fields(
-            transfer_keys(
-                datastore.get_many([gmr], lock_result=False, use_changed_models=False)[
-                    "user"
-                ]
-            )
-        ),
+        remove_meta_fields(transfer_keys(users_data)),
     )
 
     for user in users.values():
@@ -270,7 +250,7 @@ def add_users(
         else:
             user["is_present_in_meeting_ids"] = None
         if not internal_target and (gender_id := user.pop("gender_id", None)):
-            gender_dict = datastore.get_all("gender", ["name"], lock_result=False)
+            gender_dict = sql.get_all("gender", ["name"])
             user["gender"] = gender_dict.get(gender_id, {}).get("name")
         # limit user fields to exported objects
         collection_field_tupels = [

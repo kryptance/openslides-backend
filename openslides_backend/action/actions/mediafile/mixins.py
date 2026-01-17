@@ -87,7 +87,7 @@ class MediafileMixin(Action):
                 len(instance_fields.difference(self.meeting_fields))
                 or self.is_delete_action
             ) and not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
             ):
@@ -242,7 +242,7 @@ class MediafileCreateMixin(MediafileMixin):
             mm_instance["is_public"],
             mm_instance["inherited_access_group_ids"],
         ) = calculate_inherited_groups_helper_with_parent_id(
-            self.datastore,
+            self.sql,
             mm_instance.get("access_group_ids"),
             instance.get("parent_id"),
             meeting_id,

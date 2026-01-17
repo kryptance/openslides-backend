@@ -401,7 +401,7 @@ class BaseMotionCreateForwarded(
         ) or {}
         perm_origin = Permissions.Motion.CAN_FORWARD
         if not has_perm(
-            self.datastore, self.user_id, perm_origin, origin["meeting_id"]
+            self.sql, self.user_id, perm_origin, origin["meeting_id"]
         ):
             msg = f"You are not allowed to perform action {self.name}."
             msg += f" Missing permission: {perm_origin}"

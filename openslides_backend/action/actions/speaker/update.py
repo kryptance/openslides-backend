@@ -200,13 +200,13 @@ class SpeakerUpdate(
             ) or {}
             if meeting_user.get("user_id") == self.user_id and (
                 has_perm(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     Permissions.ListOfSpeakers.CAN_SEE,
                     speaker["meeting_id"],
                 )
                 or has_perm(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     Permissions.ListOfSpeakers.CAN_BE_SPEAKER,
                     speaker["meeting_id"],

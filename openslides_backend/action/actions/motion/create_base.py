@@ -90,6 +90,6 @@ class MotionCreateBase(
 
     def set_created_last_modified(self, instance: dict[str, Any]) -> None:
         timestamp = datetime.now(ZoneInfo("UTC"))
-        set_workflow_timestamp_helper(self.datastore, instance, timestamp)
+        set_workflow_timestamp_helper(self.sql, instance, timestamp)
         instance["last_modified"] = timestamp
         instance["created"] = timestamp

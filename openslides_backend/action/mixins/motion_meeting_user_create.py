@@ -41,21 +41,20 @@ def build_motion_meeting_user_create_action(
             instance = self.update_instance_with_meeting_id(instance)
             meeting_id = instance["meeting_id"]  # meeting_id is set from motion
 
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id(
-                    "meeting_user", instance["meeting_user_id"]
-                ),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                instance["meeting_user_id"],
                 ["user_id"],
-            )
+            ) or {}
             if not (
                 ignore_meeting_if_internal and self.internal
             ) and not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 meeting_user["user_id"],
                 OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
             ):
                 assert_belongs_to_meeting(
-                    self.datastore,
+                    self.sql,
                     [fqid_from_collection_and_id("user", meeting_user["user_id"])],
                     meeting_id,
                 )
@@ -65,9 +64,7 @@ def build_motion_meeting_user_create_action(
                 FilterOperator("motion_id", "=", instance["motion_id"]),
                 FilterOperator("meeting_id", "=", meeting_id),
             )
-            exists = self.datastore.exists(
-                collection=self.model.collection, filter_=filter
-            )
+            exists = self.sql.exists(self.model.collection, filter)
             if exists:
                 raise ActionException("(meeting_user_id, motion_id) must be unique.")
             if with_weight and instance.get("weight") is None:

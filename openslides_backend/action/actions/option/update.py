@@ -177,5 +177,5 @@ class OptionUpdateAction(UpdateAction):
         content_object_id = poll.get("content_object_id", "")
         meeting_id = poll["meeting_id"]
         check_poll_or_option_perms(
-            content_object_id, self.datastore, self.user_id, meeting_id
+            content_object_id, self.sql, self.user_id, meeting_id
         )

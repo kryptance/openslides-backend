@@ -32,7 +32,7 @@ class CheckSpeechState(Action):
             lock_result=False,
         ) or {}
         has_can_manage = has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.ListOfSpeakers.CAN_MANAGE,
             meeting_id,

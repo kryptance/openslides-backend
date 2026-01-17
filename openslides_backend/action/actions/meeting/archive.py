@@ -60,11 +60,11 @@ class MeetingArchive(UpdateAction, GetMeetingIdFromIdMixin):
         ) or {}
 
         if not has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             meeting["committee_id"],
         ) and not has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):

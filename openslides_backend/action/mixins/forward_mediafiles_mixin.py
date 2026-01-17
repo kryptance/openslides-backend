@@ -122,7 +122,7 @@ class ForwardMediafilesMixin(Action):
             if mediafile["owner_id"] != ONE_ORGANIZATION_FQID
         }:
             new_mediafiles_ids = iter(
-                self.datastore.reserve_ids(
+                self.sql.reserve_ids(
                     "mediafile",
                     sum(
                         len(mm_id_target_meeting_map.get(id_, []))
@@ -232,12 +232,10 @@ class ForwardMediafilesMixin(Action):
             for entry in instances
         )
 
-        return self.datastore.filter(
+        return self.sql.filter(
             "meeting_mediafile",
             filter_,
             ["id", "mediafile_id", "meeting_id"],
-            lock_result=False,
-            use_changed_models=False,
         )
 
     def _update_mm_replace_map(

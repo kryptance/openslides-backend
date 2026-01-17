@@ -108,7 +108,7 @@ class TopicImport(BaseImportAction):
 
     def setup_lookups(self, meeting_id: int) -> None:
         self.topic_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "topic",
             [
                 (title, entry["data"])

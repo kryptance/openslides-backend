@@ -16,7 +16,6 @@ from ..permissions.permission_helper import (
 from ..permissions.permissions import Permissions
 from ..shared.exceptions import MissingPermission, PresenterException
 from ..shared.filters import And, Filter, FilterOperator, Or
-from ..shared.patterns import fqid_from_collection_and_id
 from ..shared.schema import schema_version
 from .base import BasePresenter
 from .presenter import register_presenter
@@ -90,7 +89,7 @@ class SearchUsers(BasePresenter):
 
         if len(filters):
             # fetch result from db
-            instances = self.datastore.filter(
+            instances = self.sql.filter(
                 "user",
                 Or(*filters),
                 ["id"] + all_fields,
@@ -125,14 +124,14 @@ class SearchUsers(BasePresenter):
 
     def check_permissions(self, permission_type: int, permission_id: int) -> None:
         if has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             return
         if permission_type == UserScope.Organization:
             raise MissingPermission(OrganizationManagementLevel.CAN_MANAGE_USERS)
         if permission_type == UserScope.Committee:
             if has_committee_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 permission_id,
             ):
@@ -142,20 +141,21 @@ class SearchUsers(BasePresenter):
                     {CommitteeManagementLevel.CAN_MANAGE: permission_id}
                 )
         if has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.User.CAN_MANAGE,
             permission_id,
         ):
             return
         else:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", permission_id),
+            meeting = self.sql.get(
+                "meeting",
+                permission_id,
                 ["committee_id"],
                 lock_result=False,
-            )
+            ) or {}
             if has_committee_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 meeting["committee_id"],
             ):

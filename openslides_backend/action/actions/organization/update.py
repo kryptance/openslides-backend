@@ -148,7 +148,7 @@ class OrganizationUpdate(
         if any(
             [field in instance for field in OrganizationUpdate.group_A_fields]
         ) and not has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
         ):
@@ -157,7 +157,7 @@ class OrganizationUpdate(
         if any(
             [field in instance for field in OrganizationUpdate.group_B_fields]
         ) and not has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             OrganizationManagementLevel.SUPERADMIN,
         ):

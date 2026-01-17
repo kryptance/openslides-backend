@@ -1,7 +1,5 @@
 from typing import Any
 
-from openslides_backend.services.database.interface import Database
-
 from ...shared.filters import And, Filter, FilterOperator
 
 
@@ -13,13 +11,12 @@ def get_meeting_user_filter(meeting_id: int, user_id: int) -> Filter:
 
 
 def get_meeting_user(
-    datastore: Database, meeting_id: int, user_id: int, fields: list[str]
+    sql: Any, meeting_id: int, user_id: int, fields: list[str]
 ) -> dict[str, Any] | None:
-    result = datastore.filter(
+    result = sql.filter(
         "meeting_user",
         get_meeting_user_filter(meeting_id, user_id),
         fields,
-        lock_result=False,
     )
     if result:
         return next(iter(result.values()))
@@ -27,9 +24,9 @@ def get_meeting_user(
 
 
 def get_groups_from_meeting_user(
-    datastore: Database, meeting_id: int, user_id: int
+    sql: Any, meeting_id: int, user_id: int
 ) -> list[int]:
-    meeting_user = get_meeting_user(datastore, meeting_id, user_id, ["group_ids"])
+    meeting_user = get_meeting_user(sql, meeting_id, user_id, ["group_ids"])
     if not meeting_user:
         return []
     return meeting_user.get("group_ids") or []

@@ -35,7 +35,7 @@ class UserUpdateSelf(EmailCheckMixin, UpdateAction, UserMixin, UpdateHistoryMixi
         """
         instance["id"] = self.user_id
         instance = super().update_instance(instance)
-        check_gender_exists(self.datastore, instance)
+        check_gender_exists(self.sql, instance)
         return instance
 
     def meeting_user_set_data(self, instance: dict[str, Any]) -> None:
@@ -43,7 +43,7 @@ class UserUpdateSelf(EmailCheckMixin, UpdateAction, UserMixin, UpdateHistoryMixi
             deleg.difference(
                 (
                     get_meeting_user(
-                        self.datastore,
+                        self.sql,
                         instance["meeting_id"],
                         instance["id"],
                         ["vote_delegations_from_ids"],
@@ -66,7 +66,7 @@ class UserUpdateSelf(EmailCheckMixin, UpdateAction, UserMixin, UpdateHistoryMixi
                 or "vote_delegations_from_ids" in instance
             )
             and not has_perm(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 Permissions.User.CAN_EDIT_OWN_DELEGATION,
                 meeting_id,

@@ -39,7 +39,7 @@ class CommitteeCommonCreateUpdateMixin(
                 )
         if field_difference:
             if fails := get_failing_committee_management_levels(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 list(field_difference),
             ):

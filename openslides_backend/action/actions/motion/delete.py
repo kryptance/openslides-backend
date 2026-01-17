@@ -37,7 +37,7 @@ class MotionDelete(DeleteAction, PermissionHelperMixin):
             lock_result=False,
         ) or {}
         if has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Motion.CAN_MANAGE,
             motion["meeting_id"],

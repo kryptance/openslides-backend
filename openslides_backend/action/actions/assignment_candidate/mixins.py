@@ -29,7 +29,7 @@ class PermissionMixin(Action):
         # check phase part
         if assignment.get("phase") == "voting":
             permission = Permissions.Assignment.CAN_MANAGE
-            if not has_perm(self.datastore, self.user_id, permission, meeting_id):
+            if not has_perm(self.sql, self.user_id, permission, meeting_id):
                 raise MissingPermission(permission)
 
         # check special assignment part
@@ -41,7 +41,7 @@ class PermissionMixin(Action):
             permission = Permissions.Assignment.CAN_NOMINATE_SELF
         else:
             permission = Permissions.Assignment.CAN_NOMINATE_OTHER
-        if not has_perm(self.datastore, self.user_id, permission, meeting_id):
+        if not has_perm(self.sql, self.user_id, permission, meeting_id):
             missing_permission = permission
 
         if missing_permission:

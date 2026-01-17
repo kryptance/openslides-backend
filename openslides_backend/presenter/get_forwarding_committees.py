@@ -5,7 +5,6 @@ import fastjsonschema
 from ..permissions.permission_helper import has_perm
 from ..permissions.permissions import Permissions
 from ..shared.exceptions import PermissionDenied
-from ..shared.patterns import fqid_from_collection_and_id
 from ..shared.schema import required_id_schema, schema_version
 from .base import BasePresenter
 from .presenter import register_presenter
@@ -36,7 +35,7 @@ class GetForwardingCommittees(BasePresenter):
 
         # check permission
         if not has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Motion.CAN_MANAGE_METADATA,
             self.data["meeting_id"],
@@ -45,27 +44,29 @@ class GetForwardingCommittees(BasePresenter):
             msg += f" Missing permission: {Permissions.Motion.CAN_MANAGE_METADATA}"
             raise PermissionDenied(msg)
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", self.data["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            self.data["meeting_id"],
             ["committee_id"],
-        )
+        ) or {}
 
         if not meeting.get("committee_id"):
             return []
 
-        committee = self.datastore.get(
-            fqid_from_collection_and_id("committee", meeting["committee_id"]),
+        committee = self.sql.get(
+            "committee",
+            meeting["committee_id"],
             ["receive_forwardings_from_committee_ids"],
-        )
+        ) or {}
 
         if not committee.get("receive_forwardings_from_committee_ids"):
             return []
 
         result = []
         for committee_id in committee["receive_forwardings_from_committee_ids"]:
-            committee_data = self.datastore.get(
-                fqid_from_collection_and_id("committee", committee_id), ["name"]
-            )
+            committee_data = self.sql.get(
+                "committee", committee_id, ["name"]
+            ) or {}
             if committee_data.get("name"):
                 result.append(committee_data["name"])
         return result

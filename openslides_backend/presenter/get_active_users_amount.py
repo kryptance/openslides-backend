@@ -38,10 +38,10 @@ class GetActiveUsersAmount(BasePresenter):
 
     def check_permissions(self) -> None:
         if not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             raise MissingPermission(OrganizationManagementLevel.CAN_MANAGE_USERS)
 
     def get_amount(self) -> int:
         filter_ = FilterOperator("is_active", "=", True)
-        return self.datastore.count("user", filter_)
+        return self.sql.count("user", filter_)

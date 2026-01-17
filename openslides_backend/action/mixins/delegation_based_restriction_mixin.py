@@ -5,7 +5,6 @@ from openslides_backend.shared.filters import And, FilterOperator, Or
 
 from ...permissions.base_classes import Permission
 from ...permissions.permission_helper import has_perm
-from ...services.database.commands import GetManyRequest
 from ...shared.exceptions import MissingPermission
 
 DelegationBasedRestriction = Literal[
@@ -29,7 +28,7 @@ class DelegationBasedRestrictionMixin(Action):
         has_perm_meetings: list[int] = []
         missing_perm_meetings: list[int] = []
         for meeting_id in meeting_ids:
-            if has_perm(self.datastore, self.user_id, perm, meeting_id):
+            if has_perm(self.sql, self.user_id, perm, meeting_id):
                 has_perm_meetings.append(meeting_id)
             else:
                 missing_perm_meetings.append(meeting_id)
@@ -52,7 +51,7 @@ class DelegationBasedRestrictionMixin(Action):
         if not len(meeting_ids):
             return []
 
-        meeting_users = self.datastore.filter(
+        meeting_users = self.sql.filter(
             "meeting_user",
             And(
                 Or(
@@ -63,22 +62,16 @@ class DelegationBasedRestrictionMixin(Action):
                 FilterOperator("vote_delegated_to_id", "!=", None),
             ),
             ["meeting_id"],
-            lock_result=False,
         )
         if len(meeting_users):
             delegation_meeting_ids = [
                 meeting_user["meeting_id"] for meeting_user in meeting_users.values()
             ]
-            delegation_meetings = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting",
-                        delegation_meeting_ids,
-                        [restriction, "users_enable_vote_delegations"],
-                    ),
-                ],
-                lock_result=False,
-            )["meeting"]
+            delegation_meetings = self.sql.get_many(
+                "meeting",
+                delegation_meeting_ids,
+                [restriction, "users_enable_vote_delegations"],
+            ) if delegation_meeting_ids else {}
             broken_meetings: list[int] = []
             for meeting_id, meeting in delegation_meetings.items():
                 if meeting.get(restriction) and (

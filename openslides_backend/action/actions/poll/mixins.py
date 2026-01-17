@@ -72,7 +72,7 @@ class PollPermissionMixin(Action):
         if not content_object_id:
             raise ActionException("No 'content_object_id' was given")
         check_poll_or_option_perms(
-            content_object_id, self.datastore, self.user_id, meeting_id
+            content_object_id, self.sql, self.user_id, meeting_id
         )
 
 

@@ -2,8 +2,6 @@ from typing import Any, cast
 
 from ...models.base import Model
 from ...models.fields import BaseRelationField
-from ...services.database.interface import Database
-from ...services.database.sql_helper import SqlHelper
 from ...shared.patterns import (
     FullQualifiedField,
     collection_and_id_from_fqid,
@@ -28,16 +26,10 @@ class RelationManager:
     and writes them directly to the database.
     """
 
-    datastore: Database
-    sql: SqlHelper | None  # Direct SQL access for writing relation updates
-
+    sql: Any
     relation_field_updates: RelationUpdates
 
-    # Set to True to use direct SQL instead of events (default for new code)
-    use_direct_sql: bool = True
-
-    def __init__(self, datastore: Database, sql: SqlHelper | None = None) -> None:
-        self.datastore = datastore
+    def __init__(self, sql: Any) -> None:
         self.sql = sql
         self.relation_field_updates = {}
 
@@ -61,7 +53,7 @@ class RelationManager:
                 continue
 
             handler = SingleRelationHandler(
-                self.datastore,
+                self.sql,
                 field,
                 field_name,
                 instance,
@@ -98,11 +90,7 @@ class RelationManager:
 
     def apply_relation_updates(self, relations: RelationUpdates) -> None:
         """
-        Applies all given relations updates to the additional models in the datastore.
-
-        If use_direct_sql is True and sql is available, also writes directly to
-        the database. The datastore.apply_changed_model is still called for
-        caching/consistency during the request.
+        Applies all given relation updates directly to the database.
         """
         for fqfield, relations_element in relations.items():
             fqid = fqid_from_fqfield(fqfield)
@@ -113,12 +101,8 @@ class RelationManager:
                 field_update_element = cast(FieldUpdateElement, relations_element)
                 value = field_update_element["value"]
 
-                # Update the changed_models cache
-                self.datastore.apply_changed_model(fqid, {field_name: value})
-
-                # Direct SQL write if enabled
-                if self.use_direct_sql and self.sql:
-                    self.sql.update(collection, id_, {field_name: value})
+                # Direct SQL write
+                self.sql.update(collection, id_, {field_name: value})
 
             elif relations_element["type"] == "list_update":
                 # list updates are only issued by calculated field handlers and therefore must not be handled here

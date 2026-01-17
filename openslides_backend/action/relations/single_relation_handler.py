@@ -11,18 +11,18 @@ from ...models.fields import (
     RelationField,
     RelationListField,
 )
-from ...services.database.interface import Database, PartialModel
 from ...shared.exceptions import ActionException
 from ...shared.patterns import (
     Collection,
     FullQualifiedId,
+    collection_and_id_from_fqid,
     collection_from_fqid,
     fqfield_from_fqid_and_field,
     fqid_from_collection_and_id,
     id_from_fqid,
     transform_to_fqids,
 )
-from .typing import FieldUpdateElement, RelationFieldUpdates
+from .typing import FieldUpdateElement, PartialModel, RelationFieldUpdates
 
 
 class SingleRelationHandler:
@@ -39,12 +39,12 @@ class SingleRelationHandler:
 
     def __init__(
         self,
-        datastore: Database,
+        sql: Any,
         field: BaseRelationField,
         field_name: str,
         instance: dict[str, Any],
     ) -> None:
-        self.datastore = datastore
+        self.sql = sql
         self.model = model_registry[field.own_collection]
         self.id = instance["id"]
         self.field = field
@@ -128,11 +128,12 @@ class SingleRelationHandler:
             # acquire all related models with the related fields
             rels: dict[FullQualifiedId, PartialModel] = defaultdict(dict)
             for fqid in changed_fqids_per_collection[collection]:
-                related_model = self.datastore.get(
-                    fqid,
+                fqid_collection, fqid_id = collection_and_id_from_fqid(fqid)
+                related_model = self.sql.get(
+                    fqid_collection,
+                    fqid_id,
                     [related_name],
-                    raise_exception=False,
-                )
+                ) or {}
                 # again, we transform everything to lists of fqids
                 rels[fqid][related_name] = transform_to_fqids(
                     related_model.get(related_name), self.model.collection
@@ -179,12 +180,13 @@ class SingleRelationHandler:
         self, fqid: FullQualifiedId
     ) -> "SingleRelationHandler":
         collection = collection_from_fqid(fqid)
+        id_ = id_from_fqid(fqid)
         field_name = self.get_related_name(collection)
         field = self.get_reverse_field(collection)
-        instance = self.datastore.get(fqid, ["id", field_name])
+        instance = self.sql.get(collection, id_, ["id", field_name]) or {}
         instance[field_name] = None
         return SingleRelationHandler(
-            self.datastore,
+            self.sql,
             field,
             field_name,
             instance,
@@ -214,14 +216,12 @@ class SingleRelationHandler:
         """
         add: set[FullQualifiedId]
         remove: set[FullQualifiedId]
-        # We have to compare with the current datastore state.
-        # Retrieve current object from datastore
-        current_obj = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, self.id),
+        # Retrieve current object from database
+        current_obj = self.sql.get(
+            self.model.collection,
+            self.id,
             [self.field_name],
-            use_changed_models=False,
-            raise_exception=False,
-        )
+        ) or {}
 
         # Get current ids from relation field
         current_value = current_obj.get(self.field_name)
@@ -232,12 +232,12 @@ class SingleRelationHandler:
         # Calculate add set and remove set
         new_fqids = set(rel_fqids)
         add = new_fqids - current_fqids
-        # filter out deleted models for improved performance
-        remove = {
-            fqid
-            for fqid in current_fqids - new_fqids
-            if not self.datastore.is_to_be_deleted(fqid)
-        }
+        # filter out deleted models (they no longer exist in database)
+        remove = set()
+        for fqid in current_fqids - new_fqids:
+            collection, id_ = collection_and_id_from_fqid(fqid)
+            if self.sql.get(collection, id_, ["id"]):
+                remove.add(fqid)
 
         return add, remove
 

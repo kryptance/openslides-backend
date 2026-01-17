@@ -89,12 +89,12 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
     def check_permissions(self, instance: dict[str, Any]) -> None:
         super().check_permissions(instance)
 
-        permstore = PermissionVarStore(self.datastore, self.user_id)
+        permstore = PermissionVarStore(self.sql, self.user_id)
         self.permission_check = CreateUpdatePermissionsFailingFields(
             self.user_id,
             permstore,
             self.services,
-            self.datastore,
+            self.sql,
             self.relation_manager,
             self.logging,
             self.env,
@@ -606,7 +606,7 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
 
     def setup_lookups(self, data: list[dict[str, Any]]) -> None:
         self.username_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (username, entry)
@@ -617,7 +617,7 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             mapped_fields=["username", "saml_id", "default_password"],
         )
         self.saml_id_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (saml_id, entry)
@@ -628,7 +628,7 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             mapped_fields=["saml_id", "username", "default_password"],
         )
         self.names_email_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (names_email, entry)
@@ -648,14 +648,14 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             mapped_fields=["username", "saml_id", "default_password"],
         )
         self.all_saml_id_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [(saml_id, entry) for entry in data if (saml_id := entry.get("saml_id"))],
             field="saml_id",
             mapped_fields=["username", "saml_id"],
         )
         self.member_number_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "user",
             [
                 (member_number, entry)
@@ -683,7 +683,7 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             if (home_committee := entry.get("home_committee"))
         }
         self.committee_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "committee",
             [(home_committee, {}) for home_committee in home_committee_names],
         )

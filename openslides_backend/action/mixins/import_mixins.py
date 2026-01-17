@@ -17,9 +17,6 @@ from openslides_backend.action.action import Action
 from ...models.models import ImportPreview
 from ...shared.exceptions import ActionException
 from ...shared.filters import And, Filter, FilterOperator, Or
-from ...shared.interfaces.event import Event, EventType
-from ...shared.interfaces.services import Database
-from ...shared.interfaces.write_request import WriteRequest
 from ...shared.patterns import fqid_from_collection_and_id
 from ...shared.schema import required_id_schema
 from ..util.default_schema import DefaultSchema
@@ -60,7 +57,7 @@ class ResultType(Enum):
 class Lookup:
     def __init__(
         self,
-        datastore: Database,
+        sql: Any,
         collection: str,
         name_entries: list[tuple[SearchFieldType, dict[str, Any]]],
         field: SearchFieldType = "name",
@@ -69,7 +66,7 @@ class Lookup:
     ) -> None:
         if mapped_fields is None:
             mapped_fields = []
-        self.datastore = datastore
+        self.sql = sql
         self.collection = collection
         self.field = field
         self.name_to_ids: dict[SearchFieldType, list[dict[str, Any]]] = defaultdict(
@@ -104,11 +101,10 @@ class Lookup:
             else:
                 filter_ = Or(*or_filters)
 
-            for entry in datastore.filter(
+            for entry in sql.filter(
                 collection,
                 filter_,
                 mapped_fields,
-                lock_result=False,
             ).values():
                 self.add_item(entry)
 
@@ -208,11 +204,11 @@ class BaseImportAction(BaseImportJsonUploadAction):
 
     def prefetch(self, action_data: ActionData) -> None:
         store_id = cast(list[dict[str, Any]], action_data)[0]["id"]
-        import_preview = self.datastore.get(
-            fqid_from_collection_and_id("import_preview", store_id),
+        import_preview = self.sql.get(
+            "import_preview",
+            store_id,
             ["result", "state", "name"],
-            lock_result=False,
-        )
+        ) or {}
         if import_preview.get("name") != self.import_name:
             raise ActionException(
                 f"Wrong id doesn't point on {self.import_name} import data."
@@ -354,20 +350,7 @@ class BaseImportAction(BaseImportJsonUploadAction):
                 store_id = instance["id"]
                 if self.import_state == ImportState.ERROR:
                     continue
-                self.datastore.write(
-                    WriteRequest(
-                        events=[
-                            Event(
-                                type=EventType.Delete,
-                                fqid=fqid_from_collection_and_id(
-                                    "import_preview", store_id
-                                ),
-                            )
-                        ],
-                        user_id=self.user_id,
-                        locked_fields={},
-                    )
-                )
+                self.sql.delete("import_preview", store_id)
 
         return on_success
 
@@ -408,29 +391,19 @@ class BaseJsonUploadAction(BaseImportJsonUploadAction):
     def store_rows_in_the_import_preview(self, import_name: str) -> None:
         # Use sql.reserve_id for direct database access
         self.new_store_id = self.sql.reserve_id(collection="import_preview")
-        fqid = fqid_from_collection_and_id("import_preview", self.new_store_id)
         time_created = datetime.now(ZoneInfo("UTC"))
         result: dict[str, list[dict[str, Any]] | int] = {"rows": self.rows}
         if hasattr(self, "meeting_id"):
             result["meeting_id"] = self.meeting_id
-        self.datastore.write(
-            WriteRequest(
-                events=[
-                    Event(
-                        type=EventType.Create,
-                        fqid=fqid,
-                        fields={
-                            "id": self.new_store_id,
-                            "name": import_name,
-                            "result": Jsonb(result),
-                            "created": time_created,
-                            "state": self.import_state,
-                        },
-                    )
-                ],
-                user_id=self.user_id,
-                locked_fields={},
-            )
+        self.sql.insert(
+            "import_preview",
+            {
+                "id": self.new_store_id,
+                "name": import_name,
+                "result": Jsonb(result),
+                "created": time_created,
+                "state": self.import_state,
+            },
         )
 
     def handle_relation_updates(self, instance: dict[str, Any]) -> Any:
@@ -522,12 +495,7 @@ class BaseJsonUploadAction(BaseImportJsonUploadAction):
         super().validate_instance(instance)
         if "meeting_id" in instance:
             id_ = instance["meeting_id"]
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", id_),
-                ["id"],
-                lock_result=False,
-                raise_exception=False,
-            )
+            meeting = self.sql.get("meeting", id_, ["id"])
             if not meeting:
                 raise ActionException(f"Import tries to use non-existent meeting {id_}")
 

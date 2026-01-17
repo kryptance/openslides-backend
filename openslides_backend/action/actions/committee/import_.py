@@ -248,7 +248,7 @@ class CommitteeImport(BaseImportAction, CommitteeImportMixin):
 
     def setup_lookups(self) -> None:
         self.committee_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "committee",
             [
                 (entry["name"]["value"], entry)

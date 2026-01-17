@@ -48,7 +48,7 @@ class ChatMessageCreate(MeetingUserHelperMixin, CreateActionWithInferredMeeting)
         if not (
             (write_group_set & user_group_set)
             or has_perm(
-                self.datastore, self.user_id, Permissions.Chat.CAN_MANAGE, meeting_id
+                self.sql, self.user_id, Permissions.Chat.CAN_MANAGE, meeting_id
             )
         ):
             raise PermissionDenied("You are not allowed to write in this chat group.")

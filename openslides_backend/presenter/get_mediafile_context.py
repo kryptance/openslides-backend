@@ -8,7 +8,6 @@ from ..models.models import Meeting
 from ..permissions.management_levels import OrganizationManagementLevel
 from ..permissions.permission_helper import has_organization_management_level, has_perm
 from ..permissions.permissions import Permissions
-from ..services.database.commands import GetManyRequest
 from ..shared.exceptions import MissingPermission
 from ..shared.patterns import KEYSEPARATOR
 from ..shared.schema import schema_version
@@ -45,7 +44,7 @@ class GetMediafileContext(BasePresenter):
     def get_result(self) -> Any:
         self.meeting_names: dict[int, str] = {}
         result: dict[int, Any] = {}
-        gmr = GetManyRequest(
+        mediafiles = self.sql.get_many(
             "mediafile",
             self.data["mediafile_ids"],
             [
@@ -55,8 +54,7 @@ class GetMediafileContext(BasePresenter):
                 "meeting_mediafile_ids",
                 "child_ids",
             ],
-        )
-        mediafiles = self.datastore.get_many([gmr]).get("mediafile", {})
+        ) if self.data["mediafile_ids"] else {}
         self.check_permissions(
             {mediafile["owner_id"] for mediafile in mediafiles.values()}
         )
@@ -78,7 +76,7 @@ class GetMediafileContext(BasePresenter):
     def check_permissions(self, owner_ids: set[str]) -> None:
         if ONE_ORGANIZATION_FQID in owner_ids:
             if not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
             ):
@@ -90,7 +88,7 @@ class GetMediafileContext(BasePresenter):
             _, id_str = owner_id.split(KEYSEPARATOR)
             id_ = int(id_str)
             if not has_perm(
-                self.datastore, self.user_id, Permissions.Mediafile.CAN_MANAGE, id_
+                self.sql, self.user_id, Permissions.Mediafile.CAN_MANAGE, id_
             ):
                 raise MissingPermission(Permissions.Mediafile.CAN_MANAGE)
 
@@ -99,7 +97,7 @@ class GetMediafileContext(BasePresenter):
         mediafile: dict[str, Any] = {},
         meeting_mediafiles: dict[int, dict[str, Any]] = {},
     ) -> tuple[int, dict[int, dict[str, Any]]]:
-        gmrs: list[GetManyRequest] = []
+        data: dict[str, dict[int, dict[str, Any]]] = {}
         meeting_ids = {
             m_mediafile["meeting_id"] for m_mediafile in meeting_mediafiles.values()
         }
@@ -110,45 +108,38 @@ class GetMediafileContext(BasePresenter):
             for projection_id in m_mediafile.get("projection_ids", [])
         }
         if meeting_mediafile_ids := mediafile.get("meeting_mediafile_ids"):
-            gmrs.append(
-                GetManyRequest(
-                    "meeting_mediafile",
-                    meeting_mediafile_ids,
-                    [
-                        "meeting_id",
-                        "attachment_ids",
-                        "projection_ids",
-                        *self.logo_fields,
-                        *self.font_fields,
-                    ],
-                )
+            data["meeting_mediafile"] = self.sql.get_many(
+                "meeting_mediafile",
+                meeting_mediafile_ids,
+                [
+                    "meeting_id",
+                    "attachment_ids",
+                    "projection_ids",
+                    *self.logo_fields,
+                    *self.font_fields,
+                ],
             )
-        if child_ids := mediafile.get("child_ids", []):
-            gmrs.append(
-                GetManyRequest(
-                    "mediafile", child_ids, ["meeting_mediafile_ids", "child_ids"]
-                )
+        child_ids = mediafile.get("child_ids", [])
+        if child_ids:
+            data["mediafile"] = self.sql.get_many(
+                "mediafile", child_ids, ["meeting_mediafile_ids", "child_ids"]
             )
         number_of_children = len(child_ids)
         if len(meeting_ids):
-            gmrs.append(GetManyRequest("meeting", list(meeting_ids), ["name"]))
-        if len(projection_ids):
-            gmrs.append(
-                GetManyRequest(
-                    "projection",
-                    list(projection_ids),
-                    [
-                        "meeting_id",
-                        "current_projector_id",
-                        "history_projector_id",
-                        "preview_projector_id",
-                    ],
-                )
+            data["meeting"] = self.sql.get_many(
+                "meeting", list(meeting_ids), ["name"]
             )
-        if len(gmrs):
-            data = self.datastore.get_many(gmrs)
-        else:
-            data = {}
+        if len(projection_ids):
+            data["projection"] = self.sql.get_many(
+                "projection",
+                list(projection_ids),
+                [
+                    "meeting_id",
+                    "current_projector_id",
+                    "history_projector_id",
+                    "preview_projector_id",
+                ],
+            )
         if meetings := data.get("meeting"):
             self.meeting_names.update(
                 {

@@ -172,7 +172,7 @@ class UserUpdate(
         elif is_active is False and user.get("is_active"):
             self.auth.clear_sessions_by_user_id(instance["id"])
 
-        check_gender_exists(self.datastore, instance)
+        check_gender_exists(self.sql, instance)
         return instance
 
     @original_instances

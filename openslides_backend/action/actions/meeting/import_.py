@@ -113,7 +113,7 @@ class MeetingImport(
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.SUPERADMIN
+            self.sql, self.user_id, OrganizationManagementLevel.SUPERADMIN
         ):
             raise MissingPermission(OrganizationManagementLevel.SUPERADMIN)
 
@@ -469,9 +469,6 @@ class MeetingImport(
                 new_collection[str(entry["id"])] = entry
                 if collection != "user" or old_entry_id not in self.merge_user_map:
                     entry["meta_new"] = True
-                self.datastore.apply_changed_model(
-                    fqid_from_collection_and_id(collection, entry["id"]), entry
-                )
             new_json_data[collection] = new_collection
         instance["meeting"] = new_json_data
 
@@ -601,11 +598,6 @@ class MeetingImport(
             self.replace_map["meeting_user"].update(
                 {0: new_meeting_user_id}
             )  # create a meeting_user.update event
-            self.datastore.apply_changed_model(fqid_user, request_user)
-            self.datastore.apply_changed_model(
-                fqid_from_collection_and_id("meeting_user", new_meeting_user_id),
-                data_json["meeting_user"][str(new_meeting_user_id)],
-            )
         if new_meeting_user_id not in (
             meeting_user_ids := data_json["group"][str(admin_group_id)].get(
                 "meeting_user_ids", []

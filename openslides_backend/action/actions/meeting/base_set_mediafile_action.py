@@ -54,7 +54,7 @@ class BaseMeetingSetMediafileAction(UpdateAction, GetMeetingIdFromIdMixin):
         ) or {}
         self.check_owner(mediafile, instance)
         mm_id_or_payload = get_meeting_mediafile_id_or_create_payload(
-            self.datastore,
+            self.sql,
             instance["id"],
             instance.pop("mediafile_id", 0),
             lock_result=False,

@@ -44,7 +44,7 @@ class ProjectorToggle(WeightMixin, UpdateAction):
             meeting_id = instance["meeting_id"]
             fqid_content_object = instance["content_object_id"]
             assert_belongs_to_meeting(
-                self.datastore,
+                self.sql,
                 [fqid_content_object]
                 + [
                     fqid_from_collection_and_id("projector", id)

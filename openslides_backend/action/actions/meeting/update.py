@@ -262,7 +262,7 @@ class MeetingUpdate(
             organization.get("require_duplicate_from")
             and set_as_template is not None
             and not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION,
             )
@@ -309,7 +309,7 @@ class MeetingUpdate(
         )
 
         if meeting_check:
-            assert_belongs_to_meeting(self.datastore, meeting_check, instance["id"])
+            assert_belongs_to_meeting(self.sql, meeting_check, instance["id"])
         if instance.get("jitsi_domain"):
             if instance["jitsi_domain"].strip().startswith("https://"):
                 raise ActionException(
@@ -359,7 +359,7 @@ class MeetingUpdate(
     def check_permissions(self, instance: dict[str, Any]) -> None:
         # group A check
         if any([field in instance for field in meeting_settings_keys]) and not has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Meeting.CAN_MANAGE_SETTINGS,
             instance["id"],
@@ -368,7 +368,7 @@ class MeetingUpdate(
 
         # group B check
         if "present_user_ids" in instance and not has_perm(
-            self.datastore, self.user_id, Permissions.User.CAN_UPDATE, instance["id"]
+            self.sql, self.user_id, Permissions.User.CAN_UPDATE, instance["id"]
         ):
             raise MissingPermission(Permissions.User.CAN_UPDATE)
 
@@ -377,7 +377,7 @@ class MeetingUpdate(
             "reference_projector_id" in instance
             or any(field in instance for field in Meeting.all_default_projectors())
         ) and not has_perm(
-            self.datastore,
+            self.sql,
             self.user_id,
             Permissions.Projector.CAN_MANAGE,
             instance["id"],
@@ -395,13 +395,13 @@ class MeetingUpdate(
                 ]
             ]
         ):
-            if not is_admin(self.datastore, self.user_id, instance["id"]):
+            if not is_admin(self.sql, self.user_id, instance["id"]):
                 raise PermissionDenied("Missing permission: Not admin of this meeting")
 
         # group E check
         if "organization_tag_ids" in instance:
             is_manager = has_committee_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 self.get_committee_id(instance["id"]),
             )
@@ -422,7 +422,7 @@ class MeetingUpdate(
             ]
         ):
             is_superadmin = has_organization_management_level(
-                self.datastore, self.user_id, OrganizationManagementLevel.SUPERADMIN
+                self.sql, self.user_id, OrganizationManagementLevel.SUPERADMIN
             )
             if not is_superadmin:
                 raise MissingPermission(OrganizationManagementLevel.SUPERADMIN)

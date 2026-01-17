@@ -36,10 +36,10 @@ class TreeSortMixin(Action):
 
         # Get all item ids to verify, that the user send all ids.
         filter = FilterOperator("meeting_id", "=", meeting_id)
-        db_instances = self.datastore.filter(
-            collection=self.model.collection,
-            filter_=filter,
-            mapped_fields=["id"],
+        db_instances = self.sql.filter(
+            self.model.collection,
+            filter,
+            ["id"],
         )
         all_model_ids = set(db_instances.keys())
 

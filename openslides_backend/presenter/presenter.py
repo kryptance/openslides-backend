@@ -4,7 +4,7 @@ import fastjsonschema
 from fastjsonschema import JsonSchemaException
 from osauthlib import AUTHENTICATION_HEADER, COOKIE_NAME
 
-from openslides_backend.services.database.extended_database import ExtendedDatabase
+from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
     get_new_os_conn,
 )
@@ -77,7 +77,7 @@ class PresenterHandler(BaseHandler):
 
         # Parse presentations and creates response
         with get_new_os_conn() as conn:
-            self.datastore = ExtendedDatabase(conn, self.logging, self.env)
+            self.sql = SqlHelper(conn)
             response, access_token = self.parse_presenters(request)
         self.logger.debug("Request was successful. Send response now.")
         return response, access_token
@@ -121,12 +121,11 @@ class PresenterHandler(BaseHandler):
             presenter_instance = PresenterClass(
                 presenter_blob.get("data"),
                 self.services,
-                self.datastore,
+                self.sql,
                 self.logging,
                 user_id,
             )
             presenter_instance.validate()
-            # with self.datastore.get_database_context():
             result = presenter_instance.get_result()
             response.append(result)
         self.logger.debug("Presenter data ready.")

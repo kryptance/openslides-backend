@@ -126,7 +126,7 @@ class AgendaItemForward(SingularActionMixin, UpdateAction):
         forbidden_meeting_ids = {
             meeting_id
             for meeting_id in meeting_ids
-            if not is_admin(self.datastore, self.user_id, meeting_id)
+            if not is_admin(self.sql, self.user_id, meeting_id)
         }
         if forbidden_meeting_ids:
             raise PermissionDenied(

@@ -27,7 +27,7 @@ class CheckUniqueInContextMixin(Action):
         if self_id:
             filter = And(filter, FilterOperator("id", "!=", self_id))
 
-        name_exists = self.datastore.exists(
+        name_exists = self.sql.exists(
             self.model.collection,
             filter,
         )

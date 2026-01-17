@@ -3,9 +3,14 @@ from typing import Any
 
 from openslides_backend.models.fields import GenericRelationField, RelationField
 from openslides_backend.shared.interfaces.event import Event, EventType
-from openslides_backend.shared.patterns import fqid_from_collection_and_id, id_from_fqid
+from openslides_backend.shared.patterns import (
+    collection_and_id_from_fqid,
+    fqid_from_collection_and_id,
+    id_from_fqid,
+)
 
 from ..action import Action
+from ..generics.delete import DeleteAction
 
 
 class ExtendHistoryMixin(Action):
@@ -20,12 +25,15 @@ class ExtendHistoryMixin(Action):
         yield from super().create_events(instance)
         field = self.model.get_field(self.extend_history_to)
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
-        model = self.datastore.get(
-            fqid,
-            [self.extend_history_to],
-            use_changed_models=not self.datastore.is_deleted(fqid),
-        )
-        value = model[self.extend_history_to]
+        # Check if model is pending deletion
+        is_deleted = fqid in DeleteAction._pending_delete_fqids
+        if is_deleted:
+            return
+        collection, id_ = collection_and_id_from_fqid(fqid)
+        model = self.sql.get(collection, id_, [self.extend_history_to]) or {}
+        value = model.get(self.extend_history_to)
+        if not value:
+            return
         if isinstance(field, GenericRelationField):
             yield self.build_event(EventType.Update, value, {"id": id_from_fqid(value)})
         elif isinstance(field, RelationField):

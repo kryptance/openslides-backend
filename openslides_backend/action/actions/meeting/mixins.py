@@ -34,7 +34,7 @@ class MeetingPermissionMixin(CheckUniqueInContextMixin):
                     user.get("organization_management_level")
                     != OrganizationManagementLevel.SUPERADMIN
                 ) and not has_perm(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     Permissions.Meeting.CAN_MANAGE_SETTINGS,
                     id_,
@@ -47,7 +47,7 @@ class MeetingPermissionMixin(CheckUniqueInContextMixin):
                         )
 
         if not has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             committee_id,
         ):

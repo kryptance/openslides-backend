@@ -276,7 +276,7 @@ class MediafileMoveAction(
             mm_instance["is_public"],
             mm_instance["inherited_access_group_ids"],
         ) = calculate_inherited_groups_helper_with_parent_id(
-            self.datastore, access_group_ids, instance.get("parent_id"), meeting_id
+            self.sql, access_group_ids, instance.get("parent_id"), meeting_id
         )
         children = self.handle_children(
             instance,
@@ -286,7 +286,7 @@ class MediafileMoveAction(
         )
         for child in list(children):
             meeting_mediafile_id, _ = find_meeting_mediafile(
-                self.datastore, child["meeting_id"], child["id"], lock_result=False
+                self.sql, child["meeting_id"], child["id"], lock_result=False
             )
             if meeting_mediafile_id:
                 child["id"] = meeting_mediafile_id

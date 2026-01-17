@@ -38,7 +38,7 @@ class CommitteeCreate(CommitteeCommonCreateUpdateMixin, CreateAction):
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if parent_id := instance.get("parent_id"):
             if not has_committee_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 parent_id,
             ):

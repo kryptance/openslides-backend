@@ -44,7 +44,7 @@ class MotionCommentMixin(MeetingUserHelperMixin, Action):
             return
 
         if has_committee_management_level(
-            self.datastore, self.user_id, meeting["committee_id"]
+            self.sql, self.user_id, meeting["committee_id"]
         ):
             return
 

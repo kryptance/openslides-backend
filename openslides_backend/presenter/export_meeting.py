@@ -35,12 +35,12 @@ class Export(BasePresenter):
     def get_result(self) -> Any:
         # check permissions
         if not has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.SUPERADMIN
+            self.sql, self.user_id, OrganizationManagementLevel.SUPERADMIN
         ):
             msg = "You are not allowed to perform presenter export_meeting."
             msg += f" Missing permission: {OrganizationManagementLevel.SUPERADMIN}"
             raise PermissionDenied(msg)
-        export_data = export_meeting(self.datastore, self.data["meeting_id"])
+        export_data = export_meeting(self.sql, self.data["meeting_id"])
         if id_ := next(
             (
                 id_

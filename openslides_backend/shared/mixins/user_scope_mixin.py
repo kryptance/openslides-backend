@@ -14,9 +14,7 @@ from ...permissions.permission_helper import (
     has_perm,
 )
 from ...permissions.permissions import Permission, Permissions
-from ...services.database.interface import GetManyRequest
 from ..exceptions import MissingPermission
-from ..patterns import fqid_from_collection_and_id
 
 
 class UserScope(StrEnum):
@@ -55,16 +53,16 @@ class UserScopeMixin(BaseServiceProvider):
             if "group_ids" in user and "meeting_id" in user:
                 meeting_ids.append(user["meeting_id"])
         else:
-            user = self.datastore.get(
-                fqid_from_collection_and_id("user", id_or_instance),
+            user = self.sql.get(
+                "user",
+                id_or_instance,
                 [
                     "meeting_ids",
                     "organization_management_level",
                     "committee_management_ids",
                     "home_committee_id",
                 ],
-                lock_result=False,
-            )
+            ) or {}
             meeting_ids += user.get("meeting_ids", [])
         committees_manager = set(user.get("committee_management_ids") or [])
         oml_right = user.get("organization_management_level", "")
@@ -148,12 +146,12 @@ class UserScopeMixin(BaseServiceProvider):
         Checks that requested user is not a committee manager.
         """
         if not (hasattr(self, "name") and self.name == "user.create"):
-            if self.datastore.get(
-                fqid_from_collection_and_id("user", instance_id),
+            user = self.sql.get(
+                "user",
+                instance_id,
                 ["committee_management_ids"],
-                lock_result=False,
-                use_changed_models=False,
-            ).get("committee_management_ids", []):
+            ) or {}
+            if user.get("committee_management_ids", []):
                 return False
         return True
 
@@ -172,28 +170,20 @@ class UserScopeMixin(BaseServiceProvider):
             }
         ):
             return {}
-        if not (
-            a_meeting_ids := set(
-                self.datastore.get(
-                    fqid_from_collection_and_id("user", self.user_id),
-                    ["meeting_ids"],
-                    lock_result=False,
-                ).get("meeting_ids", [])
-            )
-        ):
+        user = self.sql.get(
+            "user",
+            self.user_id,
+            ["meeting_ids"],
+        ) or {}
+        if not (a_meeting_ids := set(user.get("meeting_ids", []))):
             return {}
         if not b_meeting_ids.issubset(a_meeting_ids):
             return {}
-        return self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "meeting",
-                    list(b_meeting_ids),
-                    ["admin_group_id", "group_ids"],
-                )
-            ],
-            lock_result=False,
-        ).get("meeting", {})
+        return self.sql.get_many(
+            "meeting",
+            list(b_meeting_ids),
+            ["admin_group_id", "group_ids"],
+        ) if b_meeting_ids else {}
 
     def calculate_scope_data(
         self,
@@ -275,15 +265,11 @@ class UserScopeMixin(BaseServiceProvider):
         active_meetings_committees: dict[int, int] = {}
 
         if meeting_ids:
-            raw_meetings_data = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting",
-                        meeting_ids,
-                        ["committee_id", "is_active_in_organization_id"],
-                    )
-                ]
-            ).get("meeting", {})
+            raw_meetings_data = self.sql.get_many(
+                "meeting",
+                meeting_ids,
+                ["committee_id", "is_active_in_organization_id"],
+            )
 
             for meeting_id, meeting_data in raw_meetings_data.items():
                 committee_id = meeting_data["committee_id"]
@@ -340,24 +326,18 @@ class UserScopeMixin(BaseServiceProvider):
             for meeting_dict in meetings.values()
             for group_id in meeting_dict.get("group_ids", [])
         ]
+        groups = self.sql.get_many(
+            "group",
+            group_ids,
+            [
+                "meeting_user_ids",
+                "permissions",
+                "admin_group_for_meeting_id",
+            ],
+        ) if group_ids else {}
         return {
             mu_id
-            for group in self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "group",
-                        group_ids,
-                        [
-                            "meeting_user_ids",
-                            "permissions",
-                            "admin_group_for_meeting_id",
-                        ],
-                    )
-                ],
-                lock_result=False,
-            )
-            .get("group", {})
-            .values()
+            for group in groups.values()
             if (
                 group.get("admin_group_for_meeting_id")
                 or "user.can_update" in group.get("permissions", [])
@@ -379,20 +359,12 @@ class UserScopeMixin(BaseServiceProvider):
         meeting_id_to_admin_user_ids: dict[int, set[int]] = {
             meeting_id: set() for meeting_id in all_meetings
         }
-        for meeting_user in (
-            self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting_user",
-                        list(admin_meeting_user_ids),
-                        ["user_id", "meeting_id"],
-                    )
-                ],
-                lock_result=False,
-            )
-            .get("meeting_user", {})
-            .values()
-        ):
+        meeting_users = self.sql.get_many(
+            "meeting_user",
+            list(admin_meeting_user_ids),
+            ["user_id", "meeting_id"],
+        ) if admin_meeting_user_ids else {}
+        for meeting_user in meeting_users.values():
             meeting_id_to_admin_user_ids[meeting_user["meeting_id"]].add(
                 meeting_user["user_id"]
             )
@@ -412,14 +384,14 @@ class UserScopeMixin(BaseServiceProvider):
             always_check_user_oml
             and user_oml
             and not has_organization_management_level(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 perm := OrganizationManagementLevel(user_oml),
             )
         ):
             raise MissingPermission({perm: 1})
         if has_organization_management_level(
-            self.datastore, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
+            self.sql, self.user_id, OrganizationManagementLevel.CAN_MANAGE_USERS
         ):
             return True
         return False
@@ -430,7 +402,7 @@ class UserScopeMixin(BaseServiceProvider):
         * CML can_manage in the committee of the requested user
         """
         if not has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             scope_id,
         ):
@@ -450,16 +422,16 @@ class UserScopeMixin(BaseServiceProvider):
             (default - user.can_manage)
         * CML can_manage in the meeting's committee
         """
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", scope_id),
+        meeting = self.sql.get(
+            "meeting",
+            scope_id,
             ["committee_id"],
-            lock_result=False,
-        )
+        ) or {}
         if not has_committee_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             meeting["committee_id"],
-        ) and not has_perm(self.datastore, self.user_id, meeting_permission, scope_id):
+        ) and not has_perm(self.sql, self.user_id, meeting_permission, scope_id):
             raise MissingPermission(
                 {
                     OrganizationManagementLevel.CAN_MANAGE_USERS: 1,
@@ -481,7 +453,7 @@ class UserScopeMixin(BaseServiceProvider):
             requested user is not in archived meetings only
         """
         if get_shared_committee_management_levels(
-            self.datastore,
+            self.sql,
             self.user_id,
             list(committees_to_meetings.keys()),
         ):

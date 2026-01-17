@@ -401,16 +401,16 @@ class CommitteeJsonUpload(
                 organization_tags.update(tags)
 
         self.committee_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "committee",
             committee_tuples
             + [(name, {}) for name in other_committees if name not in committee_names],
         )
         self.username_lookup = Lookup(
-            self.datastore, "user", [(name, {}) for name in usernames], field="username"
+            self.sql, "user", [(name, {}) for name in usernames], field="username"
         )
         self.organization_tag_lookup = Lookup(
-            self.datastore,
+            self.sql,
             "organization_tag",
             [(name, {}) for name in organization_tags],
         )

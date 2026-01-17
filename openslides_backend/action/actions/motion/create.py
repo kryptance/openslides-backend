@@ -137,12 +137,12 @@ class MotionCreate(
         # Check can create amendment if needed else check can_create
         if instance.get("lead_motion_id"):
             perm = Permissions.Motion.CAN_CREATE_AMENDMENTS
-            if not has_perm(self.datastore, self.user_id, perm, instance["meeting_id"]):
+            if not has_perm(self.sql, self.user_id, perm, instance["meeting_id"]):
                 raise MissingPermission(perm)
 
         else:
             perm = Permissions.Motion.CAN_CREATE
-            if not has_perm(self.datastore, self.user_id, perm, instance["meeting_id"]):
+            if not has_perm(self.sql, self.user_id, perm, instance["meeting_id"]):
                 raise MissingPermission(perm)
 
         # Whitelist the fields depending on the user's permissions. Each field can require multiple conjunctive permissions.
@@ -159,7 +159,7 @@ class MotionCreate(
         }
         for perm, fields in permission_to_fields.items():
             has_permission = has_perm(
-                self.datastore, self.user_id, perm, instance["meeting_id"]
+                self.sql, self.user_id, perm, instance["meeting_id"]
             )
             for field in fields:
                 if has_permission:

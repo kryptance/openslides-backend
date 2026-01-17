@@ -21,7 +21,7 @@ class SupporterActionMixin(DelegationBasedRestrictionMixin):
             ):
                 meeting_id = self.get_meeting_id(instance)
                 if not has_perm(
-                    self.datastore,
+                    self.sql,
                     self.user_id,
                     Permissions.Motion.CAN_SUPPORT,
                     meeting_id,
@@ -65,7 +65,7 @@ class SupporterActionMixin(DelegationBasedRestrictionMixin):
             if meeting.get("motions_supporters_min_amount") == 0:
                 raise ActionException("Motion supporters system deactivated.")
             if not has_perm(
-                self.datastore,
+                self.sql,
                 self.user_id,
                 Permissions.Motion.CAN_MANAGE_METADATA,
                 meeting_id,

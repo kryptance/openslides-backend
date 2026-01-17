@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 from ...models.fields import BaseRelationField, OnDelete
 from ...shared.exceptions import ActionException, ProtectedModelsException
@@ -11,7 +11,6 @@ from ...shared.patterns import (
     id_from_fqid,
     transform_to_fqids,
 )
-from ...shared.typing import DeletedModel
 from ..action import Action
 from ..util.actions_map import actions_map
 from ..util.typing import ActionData
@@ -30,8 +29,10 @@ class DeleteAction(Action):
     - SET_NULL: Sets the relation field to NULL on related models
     """
 
-    # Set to True to use direct SQL instead of events (default for new code)
-    use_direct_sql: bool = True
+    # Class-level sets to track deletions across cascading delete actions
+    # These are reset at the start of each top-level delete action
+    _pending_delete_fqids: ClassVar[set[str]] = set()
+    _pending_protected_fqids: ClassVar[set[str]] = set()
 
     def base_update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         """
@@ -39,22 +40,20 @@ class DeleteAction(Action):
         """
         this_fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
 
-        if self.datastore.is_to_be_deleted(this_fqid):
+        # Skip if already marked for deletion (prevents infinite loops in CASCADE)
+        if this_fqid in DeleteAction._pending_delete_fqids:
             return instance
-        self.datastore.apply_to_be_deleted(this_fqid)
+        DeleteAction._pending_delete_fqids.add(this_fqid)
 
         relevant_fields = [
             field.get_own_field_name() for field in self.model.get_relation_fields()
         ]
         # Fetch db instance with all relevant fields
-        # Use sql.get for direct database access
         db_instance = self.sql.get(
             self.model.collection,
             instance["id"],
             relevant_fields,
-        )
-        if not db_instance:
-            db_instance = {}
+        ) or {}
 
         # Update instance (by default this does nothing)
         instance = self.update_instance(instance)
@@ -74,7 +73,7 @@ class DeleteAction(Action):
                     protected_fqids = [
                         fqid
                         for fqid in foreign_fqids
-                        if not self.datastore.is_to_be_deleted_for_protected(fqid)
+                        if fqid not in DeleteAction._pending_protected_fqids
                     ]
                     if protected_fqids:
                         raise ProtectedModelsException(this_fqid, protected_fqids)
@@ -82,7 +81,7 @@ class DeleteAction(Action):
                     # case: field.on_delete == OnDelete.CASCADE
                     # Execute the delete action for all fqids
                     for fqid in foreign_fqids:
-                        if self.datastore.is_to_be_deleted(fqid):
+                        if fqid in DeleteAction._pending_delete_fqids:
                             # Skip models that are already tracked for deletion
                             continue
                         delete_action_class = actions_map.get(
@@ -96,7 +95,7 @@ class DeleteAction(Action):
                         # Assume that the delete action uses the standard action data
                         action_data = [{"id": id_from_fqid(fqid)}]
                         delete_actions.append((fqid, delete_action_class, action_data))
-                        self.datastore.apply_to_be_deleted_for_protected(fqid)
+                        DeleteAction._pending_protected_fqids.add(fqid)
             elif field.is_view_field:
                 # case: field.on_delete == OnDelete.SET_NULL
                 instance[field_name] = None
@@ -106,8 +105,10 @@ class DeleteAction(Action):
         all_protected_fqids: list[FullQualifiedId] = []
         for fqid, delete_action_class, delete_action_data in delete_actions:
             try:
-                # Skip models that were deleted in the meantime
-                if not self.datastore.is_deleted(fqid):
+                # Skip models that were already deleted (check database)
+                collection = collection_from_fqid(fqid)
+                id_ = id_from_fqid(fqid)
+                if self.sql.get(collection, id_, ["id"]):
                     self.execute_other_action(delete_action_class, delete_action_data)
             except ProtectedModelsException as e:
                 all_protected_fqids.extend(e.fqids)
@@ -115,7 +116,6 @@ class DeleteAction(Action):
         if all_protected_fqids:
             raise ProtectedModelsException(this_fqid, all_protected_fqids)
 
-        self.datastore.apply_changed_model(this_fqid, DeletedModel())
         return instance
 
     def create_events(self, instance: dict[str, Any]) -> Iterable[Event]:
@@ -137,9 +137,16 @@ class DeleteAction(Action):
         """
         Returns whether the given meeting was/will be deleted during this request or not.
         """
-        return self.datastore.is_to_be_deleted(
-            fqid_from_collection_and_id("meeting", meeting_id)
-        )
+        fqid = fqid_from_collection_and_id("meeting", meeting_id)
+        return fqid in DeleteAction._pending_delete_fqids
 
     def is_to_be_deleted(self, fqid: FullQualifiedId) -> bool:
-        return self.datastore.is_to_be_deleted(fqid)
+        return fqid in DeleteAction._pending_delete_fqids
+
+    @classmethod
+    def reset_delete_tracking(cls) -> None:
+        """
+        Reset the deletion tracking sets. Should be called at the start of each request.
+        """
+        cls._pending_delete_fqids = set()
+        cls._pending_protected_fqids = set()

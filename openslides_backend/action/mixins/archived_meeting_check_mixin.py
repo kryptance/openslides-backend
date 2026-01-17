@@ -1,8 +1,7 @@
-from typing import Any, cast
+from typing import Any
 
 from ...models import fields
 from ...models.base import model_registry
-from ...services.database.commands import GetManyRequest
 from ...shared.exceptions import ActionException
 from ..action import Action
 
@@ -38,15 +37,11 @@ class CheckForArchivedMeetingMixin(Action):
             ):
                 meeting_ids.update(instance[fname])
         if meeting_ids:
-            meetings = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting",
-                        cast(list[int], meeting_ids),
-                        ["is_active_in_organization_id"],
-                    )
-                ]
-            )["meeting"]
+            meetings = self.sql.get_many(
+                "meeting",
+                list(meeting_ids),
+                ["is_active_in_organization_id"],
+            )
             archived_meetings = [
                 str(meeting_id)
                 for meeting_id, value in meetings.items()

@@ -139,7 +139,7 @@ class UserMergeTogether(
         ]
         min_oml = max([*all_omls, OrganizationManagementLevel.CAN_MANAGE_USERS])
         if not has_organization_management_level(
-            self.datastore,
+            self.sql,
             self.user_id,
             min_oml,
         ):
