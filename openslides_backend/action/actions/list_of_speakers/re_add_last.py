@@ -6,7 +6,6 @@ from ....models.models import ListOfSpeakers, Speaker
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -31,13 +30,13 @@ class ListOfSpeakersReAddLastAction(UpdateAction):
         # Fetch all speakers.
         list_of_speakers_id = instance["id"]
         meeting_id = self.get_meeting_id(instance)
-        speakers = self.datastore.filter(
+        speakers = self.sql.filter(
             self.model.collection,
             And(
                 FilterOperator("list_of_speakers_id", "=", list_of_speakers_id),
                 FilterOperator("meeting_id", "=", meeting_id),
             ),
-            mapped_fields=[
+            [
                 "id",
                 "end_time",
                 "begin_time",
@@ -78,10 +77,11 @@ class ListOfSpeakersReAddLastAction(UpdateAction):
                 "Can't re-add interposed question when there's no current speaker"
             )
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["list_of_speakers_allow_multiple_speakers"],
-        )
+        ) or {}
         if not meeting.get("list_of_speakers_allow_multiple_speakers"):
             for speaker in speakers.values():
                 if (
@@ -92,12 +92,11 @@ class ListOfSpeakersReAddLastAction(UpdateAction):
                     and bool(speaker.get("point_of_order"))
                     == bool(last_speaker.get("point_of_order"))
                 ):
-                    meeting_user = self.datastore.get(
-                        fqid_from_collection_and_id(
-                            "meeting_user", last_speaker["meeting_user_id"]
-                        ),
+                    meeting_user = self.sql.get(
+                        "meeting_user",
+                        last_speaker["meeting_user_id"],
                         ["user_id"],
-                    )
+                    ) or {}
                     raise ActionException(
                         f"User {meeting_user['user_id']} is already on the list of speakers."
                     )

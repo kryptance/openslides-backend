@@ -45,10 +45,10 @@ class MediafileUpdate(MediafileMixin, UpdateAction, MediafileCalculatedFieldsMix
                 yield instance
                 continue
             if meeting_id := instance.get("meeting_id"):
-                mediafile = self.datastore.get(
-                    fqid_from_collection_and_id(self.model.collection, instance["id"]),
+                mediafile = self.sql.get(
+                    self.model.collection, instance["id"],
                     ["parent_id"],
-                )
+                ) or {}
                 (
                     instance["is_public"],
                     instance["inherited_access_group_ids"],
@@ -89,15 +89,14 @@ class MediafileUpdate(MediafileMixin, UpdateAction, MediafileCalculatedFieldsMix
                         MeetingMediafileUpdate, [{"id": m_id, **m_mediafile}]
                     )
                 else:
+                    meeting = self.sql.get(
+                        "meeting", meeting_id,
+                        ["admin_group_id"],
+                        lock_result=False,
+                    ) or {}
                     if m_mediafile.get("access_group_ids") or m_mediafile.get(
                         "inherited_access_group_ids"
-                    ) != [
-                        self.datastore.get(
-                            fqid_from_collection_and_id("meeting", meeting_id),
-                            ["admin_group_id"],
-                            lock_result=False,
-                        )["admin_group_id"]
-                    ]:
+                    ) != [meeting["admin_group_id"]]:
                         self.execute_other_action(
                             MeetingMediafileCreate,
                             [

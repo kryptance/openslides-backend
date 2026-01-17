@@ -3,7 +3,6 @@ from typing import Any
 from ....models.models import Meeting, Projector
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -44,10 +43,10 @@ class ProjectorUpdate(UpdateAction):
     def validate_instance(self, instance: dict[str, Any]) -> None:
         super().validate_instance(instance)
         if instance.get("is_internal"):
-            projector = self.datastore.get(
-                fqid_from_collection_and_id("projector", instance["id"]),
+            projector = self.sql.get(
+                "projector", instance["id"],
                 ["is_internal", "used_as_reference_projector_meeting_id"],
-            )
+            ) or {}
             if projector.get(
                 "used_as_reference_projector_meeting_id"
             ) and not projector.get("is_internal"):

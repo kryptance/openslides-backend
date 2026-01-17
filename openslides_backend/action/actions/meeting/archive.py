@@ -8,7 +8,6 @@ from ....permissions.permission_helper import (
 )
 from ....shared.exceptions import ActionException, PermissionDenied
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -23,22 +22,20 @@ class MeetingArchive(UpdateAction, GetMeetingIdFromIdMixin):
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         running_processes = []
 
-        active_speakers_exist = self.datastore.exists(
+        active_speakers_exist = self.sql.exists(
             "speaker",
             And(
                 FilterOperator("meeting_id", "=", instance["id"]),
                 FilterOperator("begin_time", "!=", None),
                 FilterOperator("end_time", "=", None),
             ),
-            lock_result=False,
         )
-        active_polls_exist = self.datastore.exists(
+        active_polls_exist = self.sql.exists(
             "poll",
             And(
                 FilterOperator("meeting_id", "=", instance["id"]),
                 FilterOperator("state", "=", "started"),
             ),
-            lock_result=False,
         )
 
         if active_speakers_exist:
@@ -55,11 +52,12 @@ class MeetingArchive(UpdateAction, GetMeetingIdFromIdMixin):
         return instance
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        meeting = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["committee_id"],
             lock_result=False,
-        )
+        ) or {}
 
         if not has_committee_management_level(
             self.datastore,

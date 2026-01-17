@@ -3,7 +3,6 @@ from typing import Any
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import MissingPermission
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import Action
 
 
@@ -13,18 +12,18 @@ class PermissionMixin(Action):
             meeting_user_id = instance["meeting_user_id"]
             assignment_id = instance["assignment_id"]
         else:
-            assignment_candidate = self.datastore.get(
-                fqid_from_collection_and_id("assignment_candidate", instance["id"]),
+            assignment_candidate = self.sql.get(
+                "assignment_candidate", instance["id"],
                 ["meeting_user_id", "assignment_id"],
                 lock_result=False,
-            )
+            ) or {}
             meeting_user_id = assignment_candidate.get("meeting_user_id")
             assignment_id = assignment_candidate["assignment_id"]
-        assignment = self.datastore.get(
-            fqid_from_collection_and_id("assignment", assignment_id),
+        assignment = self.sql.get(
+            "assignment", assignment_id,
             ["meeting_id", "phase"],
             lock_result=False,
-        )
+        ) or {}
         meeting_id = assignment["meeting_id"]
 
         # check phase part
@@ -35,9 +34,9 @@ class PermissionMixin(Action):
 
         # check special assignment part
         missing_permission = None
-        user = self.datastore.get(
-            fqid_from_collection_and_id("user", self.user_id), ["meeting_user_ids"]
-        )
+        user = self.sql.get(
+            "user", self.user_id, ["meeting_user_ids"]
+        ) or {}
         if meeting_user_id in (user.get("meeting_user_ids") or []):
             permission = Permissions.Assignment.CAN_NOMINATE_SELF
         else:

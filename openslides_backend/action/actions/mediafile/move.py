@@ -2,9 +2,8 @@ from typing import Any
 
 from ....models.models import Mediafile
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import collection_and_id_from_fqid, fqid_from_collection_and_id
+from ....shared.patterns import collection_and_id_from_fqid
 from ....shared.schema import id_list_schema
 from ...generics.update import UpdateAction
 from ...mixins.meeting_mediafile_helper import find_meeting_mediafile
@@ -69,7 +68,7 @@ class MediafileMoveAction(
         owner_collection: str,
         owner_id: int,
     ) -> ActionData:
-        get_many_request = GetManyRequest(
+        db_instances = self.sql.get_many(
             self.model.collection,
             ids,
             [
@@ -80,28 +79,28 @@ class MediafileMoveAction(
                 "child_ids",
             ],
         )
-        gm_result = self.datastore.get_many([get_many_request])
-        db_instances = gm_result.get(self.model.collection, {})
 
         parent: dict[str, Any] | None = None
         if parent_id is not None:
             # Calculate the ancesters of parent
             ancesters = [parent_id]
-            parent = grandparent = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, parent_id),
+            parent = grandparent = self.sql.get(
+                self.model.collection,
+                parent_id,
                 [
                     "parent_id",
                     "meeting_mediafile_ids",
                     "published_to_meetings_in_organization_id",
                 ],
-            )
+            ) or {}
             while grandparent.get("parent_id") is not None:
                 gp_parent_id = grandparent["parent_id"]
                 ancesters.append(gp_parent_id)
-                grandparent = self.datastore.get(
-                    fqid_from_collection_and_id(self.model.collection, gp_parent_id),
+                grandparent = self.sql.get(
+                    self.model.collection,
+                    gp_parent_id,
                     ["parent_id"],
-                )
+                ) or {}
             for id_ in ids:
                 if id_ in ancesters:
                     raise ActionException(
@@ -161,9 +160,9 @@ class MediafileMoveAction(
     ) -> ActionData:
         child_ids = db_instance.get("child_ids", [])
         if len(child_ids):
-            db_children = self.datastore.get_many(
-                [GetManyRequest("mediafile", child_ids, ["child_ids"])]
-            )["mediafile"]
+            db_children = self.sql.get_many(
+                "mediafile", child_ids, ["child_ids"]
+            )
             for id_, db_child in db_children.items():
                 yield {
                     "id": id_,
@@ -182,24 +181,18 @@ class MediafileMoveAction(
         if parent_instance and parent_instance.get(
             "published_to_meetings_in_organization_id"
         ):
-            parent_meeting_mediafiles = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting_mediafile",
-                        parent_instance.get("meeting_mediafile_ids", []),
-                        ["meeting_id"],
-                    )
-                ]
-            ).get("meeting_mediafile", {})
-            instance_meeting_mediafiles = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "meeting_mediafile",
-                        db_instance.get("meeting_mediafile_ids", []),
-                        ["meeting_id"],
-                    )
-                ]
-            ).get("meeting_mediafile", {})
+            parent_mm_ids = parent_instance.get("meeting_mediafile_ids", [])
+            parent_meeting_mediafiles = self.sql.get_many(
+                "meeting_mediafile",
+                parent_mm_ids,
+                ["meeting_id"],
+            ) if parent_mm_ids else {}
+            instance_mm_ids = db_instance.get("meeting_mediafile_ids", [])
+            instance_meeting_mediafiles = self.sql.get_many(
+                "meeting_mediafile",
+                instance_mm_ids,
+                ["meeting_id"],
+            ) if instance_mm_ids else {}
             meeting_id_to_meeting_mediafile_id = {
                 m_mediafile["meeting_id"]: m_mediafile_id
                 for m_mediafile_id, m_mediafile in instance_meeting_mediafiles.items()
@@ -250,13 +243,9 @@ class MediafileMoveAction(
             for child_id in db_instance.get("child_ids", [])
         ]
         if child_ids:
-            children = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "mediafile", child_ids, ["child_ids", "meeting_mediafile_ids"]
-                    )
-                ]
-            )["mediafile"]
+            children = self.sql.get_many(
+                "mediafile", child_ids, ["child_ids", "meeting_mediafile_ids"]
+            )
             ids.extend(
                 self.get_entire_branch_of_meeting_mediafile_ids(list(children.values()))
             )
@@ -273,10 +262,12 @@ class MediafileMoveAction(
         if meeting_mediafile_id:
             mm_instance: dict[str, Any] = {"id": meeting_mediafile_id}
             expandable_update_list.append(mm_instance)
-            access_group_ids = self.datastore.get(
-                fqid_from_collection_and_id("meeting_mediafile", meeting_mediafile_id),
+            mm_data = self.sql.get(
+                "meeting_mediafile",
+                meeting_mediafile_id,
                 ["access_group_ids"],
-            ).get("access_group_ids", [])
+            ) or {}
+            access_group_ids = mm_data.get("access_group_ids", [])
         else:
             mm_instance = {"meeting_id": meeting_id, "mediafile_id": instance["id"]}
             expandable_create_list.append(mm_instance)

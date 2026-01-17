@@ -6,7 +6,6 @@ from openslides_backend.shared.exceptions import ActionException
 
 from ....models.models import Group
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.filters import And, FilterOperator
 from ....shared.interfaces.event import Event, EventType, ListFields
 from ....shared.patterns import (
@@ -34,15 +33,16 @@ class GroupDeleteAction(DeleteAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        group = self.datastore.get(
-            fqid_from_collection_and_id("group", instance["id"]),
+        group = self.sql.get(
+            "group",
+            instance["id"],
             [
                 "meeting_mediafile_access_group_ids",
                 "meeting_mediafile_inherited_access_group_ids",
                 "meeting_user_ids",
                 "meeting_id",
             ],
-        )
+        ) or {}
         if len(group.get("meeting_user_ids", [])) and not self.is_meeting_to_be_deleted(
             group["meeting_id"]
         ):
@@ -67,7 +67,7 @@ class GroupDeleteAction(DeleteAction):
         self.group_id = instance["id"]
         mediafile_collection = "mediafile"
         meeting_mediafile_collection = "meeting_mediafile"
-        get_many_request = GetManyRequest(
+        db_meeting_mediafiles = self.sql.get_many(
             meeting_mediafile_collection,
             self.meeting_mediafile_ids,
             [
@@ -78,8 +78,6 @@ class GroupDeleteAction(DeleteAction):
                 "meeting_id",
             ],
         )
-        gm_result = self.datastore.get_many([get_many_request])
-        db_meeting_mediafiles = gm_result.get(meeting_mediafile_collection, {})
         mediafile_ids = [
             file["mediafile_id"] for file in db_meeting_mediafiles.values()
         ]
@@ -99,9 +97,12 @@ class GroupDeleteAction(DeleteAction):
             meeting_id = db_meeting_mediafiles[id_]["meeting_id"]
             root_source_id = db_meeting_mediafiles[id_]["mediafile_id"]
             while (
-                parent_source_id := self.datastore.get(
-                    fqid_from_collection_and_id(mediafile_collection, root_source_id),
-                    ["parent_id"],
+                parent_source_id := (
+                    self.sql.get(
+                        mediafile_collection,
+                        root_source_id,
+                        ["parent_id"],
+                    ) or {}
                 ).get("parent_id", 0)
             ) in mediafile_ids and (
                 parent_id := self.find_meeting_mediafile_id_for_mediafile(
@@ -141,22 +142,24 @@ class GroupDeleteAction(DeleteAction):
             "meeting_mediafile", meeting_mediafile_id
         )
 
-        mediafile = self.datastore.get(
-            mediafile_fqid,
+        mediafile = self.sql.get(
+            "mediafile",
+            mediafile_id,
             [
                 "parent_id",
                 "child_ids",
             ],
-        )
-        meeting_mediafile = self.datastore.get(
-            meeting_mediafile_fqid,
+        ) or {}
+        meeting_mediafile = self.sql.get(
+            "meeting_mediafile",
+            meeting_mediafile_id,
             [
                 "is_public",
                 "inherited_access_group_ids",
                 "access_group_ids",
                 "meeting_id",
             ],
-        )
+        ) or {}
         parent_meeting_mediafile_id = None
         if mediafile.get("parent_id"):
             parent_meeting_mediafile_id = self.find_meeting_mediafile_id_for_mediafile(
@@ -166,21 +169,24 @@ class GroupDeleteAction(DeleteAction):
             calc_is_public,
             calc_inherited_access_group_ids,
         ) = calculate_inherited_groups_helper_with_parent_meeting_mediafile_id(
-            self.datastore,
+            self.sql,
             meeting_mediafile.get("access_group_ids"),
             parent_meeting_mediafile_id,
         )
-        self.datastore.apply_changed_model(
-            meeting_mediafile_fqid,
+        # Update directly in DB - transaction ensures consistency
+        self.sql.update(
+            "meeting_mediafile",
+            meeting_mediafile_id,
             {
                 "is_public": calc_is_public,
                 "inherited_access_group_ids": calc_inherited_access_group_ids,
             },
         )
-        event_fields = self.datastore.get(
-            meeting_mediafile_fqid,
+        event_fields = self.sql.get(
+            "meeting_mediafile",
+            meeting_mediafile_id,
             ["is_public", "access_group_ids", "inherited_access_group_ids"],
-        )
+        ) or {}
         yield self.build_event(
             EventType.Update,
             meeting_mediafile_fqid,
@@ -209,7 +215,7 @@ class GroupDeleteAction(DeleteAction):
         self, mediafile_id: int, meeting_id: int
     ) -> int | None:
         meeting_mediafiles = list(
-            self.datastore.filter(
+            self.sql.filter(
                 "meeting_mediafile",
                 And(
                     FilterOperator("meeting_id", "=", meeting_id),

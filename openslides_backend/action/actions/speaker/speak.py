@@ -11,7 +11,6 @@ from openslides_backend.shared.filters import And, FilterOperator
 from ....models.models import Speaker
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -35,8 +34,9 @@ class SpeakerSpeak(SingularActionMixin, CountdownControl, UpdateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        db_instance = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        db_instance = self.sql.get(
+            self.model.collection,
+            instance["id"],
             [
                 "list_of_speakers_id",
                 "meeting_id",
@@ -46,9 +46,9 @@ class SpeakerSpeak(SingularActionMixin, CountdownControl, UpdateAction):
                 "structure_level_list_of_speakers_id",
                 "point_of_order",
             ],
-        )
+        ) or {}
         # find current speaker(s), if they exists, and end their speech
-        result = self.datastore.filter(
+        result = self.sql.filter(
             self.model.collection,
             And(
                 FilterOperator("meeting_id", "=", db_instance["meeting_id"]),
@@ -58,7 +58,7 @@ class SpeakerSpeak(SingularActionMixin, CountdownControl, UpdateAction):
                 FilterOperator("begin_time", "!=", None),
                 FilterOperator("end_time", "=", None),
             ),
-            mapped_fields=["id", "pause_time"],
+            ["id", "pause_time"],
         )
         action: type[Action]
         if db_instance.get("speech_state") == SpeechState.INTERPOSED_QUESTION:
@@ -85,11 +85,12 @@ class SpeakerSpeak(SingularActionMixin, CountdownControl, UpdateAction):
         # update countdowns, differentiate by speaker type
         countdown_time: int | None = None
         if db_instance.get("speech_state") == SpeechState.INTERVENTION:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", db_instance["meeting_id"]),
+            meeting = self.sql.get(
+                "meeting",
+                db_instance["meeting_id"],
                 ["list_of_speakers_intervention_time"],
-            )
-            countdown_time = meeting["list_of_speakers_intervention_time"]
+            ) or {}
+            countdown_time = meeting.get("list_of_speakers_intervention_time")
         elif db_instance.get("speech_state") == SpeechState.INTERPOSED_QUESTION:
             countdown_time = 0
         self.control_los_countdown(

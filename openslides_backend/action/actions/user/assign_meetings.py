@@ -9,10 +9,8 @@ from ....permissions.permission_helper import (
     has_committee_management_level,
     has_organization_management_level,
 )
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, MissingPermission
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import id_list_schema
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -49,10 +47,9 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
                 OrganizationManagementLevel.CAN_MANAGE_USERS,
             )
         ) and (meeting_ids := instance.get("meeting_ids")):
-            meetings = self.datastore.get_many(
-                [GetManyRequest("meeting", meeting_ids, ["committee_id"])],
-                lock_result=False,
-            )["meeting"]
+            meetings = self.sql.get_many(
+                "meeting", meeting_ids, ["committee_id"], lock_result=False
+            )
             committee_ids = {meeting["committee_id"] for meeting in meetings.values()}
             committee_ids = {
                 committee_id
@@ -77,12 +74,11 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
         meeting_ids_of_user_in_group: set[int] = set()
         groups_meeting_ids: set[int] = set()
         meeting_to_meeting_user: dict[int, dict[str, Any]] = {}
-        user = self.datastore.get(
-            fqid_from_collection_and_id("user", user_id),
-            [
-                "meeting_ids",
-            ],
-        )
+        user = self.sql.get(
+            "user",
+            user_id,
+            ["meeting_ids"],
+        ) or {}
         user_meeting_ids = set(user.get("meeting_ids", []))
         for meeting_id in meeting_ids:
             meeting_user = (
@@ -94,7 +90,7 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
                 FilterOperator("meeting_id", "=", meeting_id),
                 FilterOperator("anonymous_group_for_meeting_id", "=", None),
             )
-            groups = self.datastore.filter(
+            groups = self.sql.filter(
                 "group", filter_, ["meeting_id", "meeting_user_ids"]
             )
             groups_meeting_ids.update(
@@ -150,9 +146,9 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
                 meeting_user = {
                     "id": self.create_or_get_meeting_user(meeting_id, user_id)
                 }
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", meeting_id), ["default_group_id"]
-            )
+            meeting = self.sql.get(
+                "meeting", meeting_id, ["default_group_id"]
+            ) or {}
             self.execute_other_action(
                 MeetingUserUpdate,
                 [
@@ -174,12 +170,9 @@ class UserAssignMeetings(MeetingUserHelperMixin, UpdateAction):
         if meeting_ids := instance.get("meeting_ids"):
             locked_meetings = [
                 str(id_)
-                for id_, meeting in self.datastore.get_many(
-                    [GetManyRequest("meeting", meeting_ids, ["locked_from_inside"])],
-                    lock_result=False,
-                )
-                .get("meeting", {})
-                .items()
+                for id_, meeting in self.sql.get_many(
+                    "meeting", meeting_ids, ["locked_from_inside"], lock_result=False
+                ).items()
                 if meeting.get("locked_from_inside")
             ]
             if len(locked_meetings):

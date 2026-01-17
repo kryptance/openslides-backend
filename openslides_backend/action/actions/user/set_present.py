@@ -43,10 +43,10 @@ class UserSetPresentAction(UpdateAction, CheckForArchivedMeetingMixin):
         for instance in action_data:
             meeting_id = instance.pop("meeting_id")
             present = instance.pop("present")
-            user = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            user = self.sql.get(
+                self.model.collection, instance["id"],
                 ["is_present_in_meeting_ids"],
-            )
+            ) or {}
             if present:
                 if meeting_id not in user.get("is_present_in_meeting_ids", []):
                     instance["is_present_in_meeting_ids"] = user.get(
@@ -68,11 +68,11 @@ class UserSetPresentAction(UpdateAction, CheckForArchivedMeetingMixin):
             instance["meeting_id"],
         ):
             return
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", instance["meeting_id"],
             ["committee_id", "users_allow_self_set_present", "locked_from_inside"],
             lock_result=False,
-        )
+        ) or {}
         if not meeting.get("locked_from_inside"):
             if has_organization_management_level(
                 self.datastore,

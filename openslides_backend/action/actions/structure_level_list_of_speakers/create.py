@@ -5,7 +5,6 @@ from openslides_backend.action.mixins.create_action_with_inferred_meeting import
 )
 from openslides_backend.shared.exceptions import ActionException
 from openslides_backend.shared.filters import And, FilterOperator
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
 
 from ....models.models import StructureLevelListOfSpeakers
 from ....permissions.permissions import Permissions
@@ -32,15 +31,15 @@ class StructureLevelListOfSpeakersCreateAction(CreateActionWithInferredMeeting):
             FilterOperator("list_of_speakers_id", "=", instance["list_of_speakers_id"]),
             FilterOperator("meeting_id", "=", instance["meeting_id"]),
         )
-        if self.datastore.exists(collection=self.model.collection, filter_=filter):
+        if self.sql.exists(self.model.collection, filter):
             raise ActionException(
                 "(structure_level_id, list_of_speakers_id) must be unique."
             )
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", instance["meeting_id"],
             ["list_of_speakers_default_structure_level_time"],
-        )
+        ) or {}
         default_time = meeting.get("list_of_speakers_default_structure_level_time")
         if not default_time:
             raise ActionException("Structure level countdowns are deactivated")

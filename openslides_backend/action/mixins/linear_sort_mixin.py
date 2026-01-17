@@ -15,10 +15,11 @@ class LinearSortMixin(Action):
         filter: Filter,
         weight_key: str = "weight",
     ) -> ActionData:
-        db_instances = self.datastore.filter(
+        # Use sql.filter for direct database access
+        db_instances = self.sql.filter(
             collection=self.model.collection,
             filter_=filter,
-            mapped_fields=["id"],
+            fields=["id"],
         )
         valid_instance_ids = []
         for id_ in nodes:

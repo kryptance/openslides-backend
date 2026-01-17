@@ -24,7 +24,7 @@ class MeetingMediafileCreate(CreateAction):
     )
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        if self.datastore.exists(
+        if self.sql.exists(
             "meeting_mediafile",
             get_meeting_mediafile_filter(
                 instance["meeting_id"], instance["mediafile_id"]

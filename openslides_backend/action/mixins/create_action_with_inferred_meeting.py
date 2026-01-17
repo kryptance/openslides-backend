@@ -17,7 +17,9 @@ class CreateActionWithInferredMeetingMixin(CreateAction):
     def update_instance_with_meeting_id(
         self, instance: dict[str, Any]
     ) -> dict[str, Any]:
-        instance["meeting_id"] = self.get_meeting_id(instance)
+        # Allow passing meeting_id directly to avoid reading from DB
+        if "meeting_id" not in instance:
+            instance["meeting_id"] = self.get_meeting_id(instance)
         return instance
 
     def get_meeting_id(self, instance: dict[str, Any]) -> int:
@@ -26,14 +28,20 @@ class CreateActionWithInferredMeetingMixin(CreateAction):
         id = instance[self.relation_field_for_meeting]
         if isinstance(field, BaseGenericRelationField):
             fqid = cast(FullQualifiedId, id)
+            from ...shared.patterns import collection_from_fqid, id_from_fqid
+
+            collection = collection_from_fqid(fqid)
+            model_id = id_from_fqid(fqid)
         else:
             assert len(field.to) == 1
-            fqid = fqid_from_collection_and_id(field.get_target_collection(), id)
+            collection = field.get_target_collection()
+            model_id = id
         # Fetch meeting_id
-        related_model = self.datastore.get(
-            fqid,
+        related_model = self.sql.get(
+            collection,
+            model_id,
             ["meeting_id"],
-        )
+        ) or {}
         if not related_model.get("meeting_id"):
             raise ActionException(
                 f"Referenced model in field {self.relation_field_for_meeting} has no meeting id."

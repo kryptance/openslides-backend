@@ -4,7 +4,6 @@ from typing import Any, cast
 
 from ....models.models import Motion
 from ....shared.exceptions import ActionException, PermissionDenied
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import original_instances
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -44,11 +43,12 @@ class MotionCreateForwarded(BaseMotionCreateForwarded):
         super().check_permissions(instance)
 
         # check if origin motion is amendment
-        origin = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["origin_id"]),
+        origin = self.sql.get(
+            self.model.collection,
+            instance["origin_id"],
             ["lead_motion_id"],
             lock_result=False,
-        )
+        ) or {}
         if origin.get("lead_motion_id"):
             msg = "Amendments cannot be forwarded."
             raise PermissionDenied(msg)
@@ -77,15 +77,17 @@ class MotionCreateForwarded(BaseMotionCreateForwarded):
         return self.with_amendments
 
     def check_state_allow_forwarding(self, instance: dict[str, Any]) -> None:
-        origin = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["origin_id"]),
+        origin = self.sql.get(
+            self.model.collection,
+            instance["origin_id"],
             ["state_id"],
             lock_result=False,
-        )
-        state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", origin["state_id"]),
+        ) or {}
+        state = self.sql.get(
+            "motion_state",
+            origin["state_id"],
             ["allow_motion_forwarding"],
             lock_result=False,
-        )
+        ) or {}
         if not state.get("allow_motion_forwarding"):
             raise ActionException("State doesn't allow to forward motion.")

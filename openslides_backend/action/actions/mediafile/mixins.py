@@ -2,10 +2,9 @@ from typing import Any
 
 from ....permissions.management_levels import OrganizationManagementLevel
 from ....permissions.permission_helper import has_organization_management_level
-from ....services.database.commands import GetManyRequest
-from ....shared.exceptions import ActionException, DatabaseException, MissingPermission
+from ....shared.exceptions import ActionException, MissingPermission
 from ....shared.filters import And, Filter, FilterOperator, Not
-from ....shared.patterns import KEYSEPARATOR, fqid_from_collection_and_id
+from ....shared.patterns import KEYSEPARATOR
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...action import Action
 from ..meeting_mediafile.create import MeetingMediafileCreate
@@ -31,14 +30,11 @@ class MediafileMixin(Action):
         )
         parent_id = instance.get("parent_id")
         if not parent_id:
-            try:
-                mediafile = self.datastore.get(
-                    fqid_from_collection_and_id(self.model.collection, instance["id"]),
-                    ["parent_id"],
-                )
+            mediafile = self.sql.get(
+                self.model.collection, instance["id"], ["parent_id"]
+            )
+            if mediafile:
                 parent_id = mediafile.get("parent_id")
-            except DatabaseException:
-                pass
         self.check_title_parent_unique(
             instance.get("title"),
             parent_id,
@@ -66,24 +62,18 @@ class MediafileMixin(Action):
     def check_implicitly_published(
         self, instance: dict[str, Any], parent_id: int | None
     ) -> bool:
-        if (
-            "id" in instance
-            and self.datastore.get(
-                fqid_from_collection_and_id("mediafile", instance["id"]),
-                ["published_to_meetings_in_organization_id"],
-            ).get("published_to_meetings_in_organization_id")
-            == ONE_ORGANIZATION_ID
-        ):
-            return True
+        if "id" in instance:
+            mediafile = self.sql.get(
+                "mediafile", instance["id"], ["published_to_meetings_in_organization_id"]
+            ) or {}
+            if mediafile.get("published_to_meetings_in_organization_id") == ONE_ORGANIZATION_ID:
+                return True
         if not parent_id:
             return False
-        return (
-            self.datastore.get(
-                fqid_from_collection_and_id("mediafile", parent_id),
-                ["published_to_meetings_in_organization_id"],
-            ).get("published_to_meetings_in_organization_id")
-            == ONE_ORGANIZATION_ID
-        )
+        parent = self.sql.get(
+            "mediafile", parent_id, ["published_to_meetings_in_organization_id"]
+        ) or {}
+        return parent.get("published_to_meetings_in_organization_id") == ONE_ORGANIZATION_ID
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         collection, _ = self.get_owner_data(instance)
@@ -127,10 +117,9 @@ class MediafileMixin(Action):
     def get_owner_data(self, instance: dict[str, Any]) -> tuple[str, int]:
         owner_id = instance.get("owner_id")
         if not owner_id:
-            mediafile = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
-                ["owner_id"],
-            )
+            mediafile = self.sql.get(
+                self.model.collection, instance["id"], ["owner_id"]
+            ) or {}
             owner_id = mediafile["owner_id"]
         collection, id_ = str(owner_id).split(KEYSEPARATOR)
         return collection, int(id_)
@@ -139,10 +128,9 @@ class MediafileMixin(Action):
         self, parent_id: int | None, owner_id: str
     ) -> None:
         if parent_id:
-            parent = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, parent_id),
-                ["is_directory", "owner_id"],
-            )
+            parent = self.sql.get(
+                self.model.collection, parent_id, ["is_directory", "owner_id"]
+            ) or {}
             if not parent.get("is_directory"):
                 raise ActionException("Parent is not a directory.")
             if parent.get("owner_id") != owner_id:
@@ -163,13 +151,12 @@ class MediafileMixin(Action):
             )
             if id_:
                 filter_ = And(filter_, Not(FilterOperator("id", "=", id_)))
-            results = self.datastore.filter(self.model.collection, filter_, ["id"])
+            results = self.sql.filter(self.model.collection, filter_, ["id"])
             if results:
                 if parent_id:
-                    parent = self.datastore.get(
-                        fqid_from_collection_and_id(self.model.collection, parent_id),
-                        ["title"],
-                    )
+                    parent = self.sql.get(
+                        self.model.collection, parent_id, ["title"]
+                    ) or {}
                     parent_title = parent.get("title", "")
                     raise ActionException(
                         f"File '{title}' already exists in folder '{parent_title}'."
@@ -183,10 +170,10 @@ class MediafileMixin(Action):
         self, access_group_ids: list[int] | None, meeting_id: int
     ) -> None:
         if access_group_ids:
-            gm_request = GetManyRequest("group", access_group_ids, ["meeting_id"])
-            gm_result = self.datastore.get_many([gm_request], lock_result=False)
-            groups = gm_result.get("group", {}).values()
-            for group in groups:
+            groups = self.sql.get_many(
+                "group", access_group_ids, ["meeting_id"], lock_result=False
+            )
+            for group in groups.values():
                 if group.get("meeting_id") != meeting_id:
                     raise ActionException("Owner and access groups don't match.")
 
@@ -201,7 +188,7 @@ class MediafileMixin(Action):
                     filter_,
                     Not(FilterOperator("id", "=", id_)),
                 )
-            results = self.datastore.filter(self.model.collection, filter_, ["id"])
+            results = self.sql.filter(self.model.collection, filter_, ["id"])
             if results:
                 raise ActionException(f"Token '{token}' is not unique.")
 
@@ -210,10 +197,9 @@ class MediafileCreateMixin(MediafileMixin):
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
         if parent_id := instance.get("parent_id"):
-            parent = self.datastore.get(
-                fqid_from_collection_and_id("mediafile", parent_id),
-                ["published_to_meetings_in_organization_id"],
-            )
+            parent = self.sql.get(
+                "mediafile", parent_id, ["published_to_meetings_in_organization_id"]
+            ) or {}
             instance["published_to_meetings_in_organization_id"] = parent.get(
                 "published_to_meetings_in_organization_id"
             )
@@ -221,7 +207,7 @@ class MediafileCreateMixin(MediafileMixin):
 
     def handle_orga_meeting_mediafile_creation(self, instance: dict[str, Any]) -> None:
         if parent_id := instance.get("parent_id"):
-            parent_meeting_data = self.datastore.filter(
+            parent_meeting_data = self.sql.filter(
                 "meeting_mediafile",
                 FilterOperator("mediafile_id", "=", parent_id),
                 ["inherited_access_group_ids", "is_public", "meeting_id"],

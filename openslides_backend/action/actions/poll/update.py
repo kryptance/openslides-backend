@@ -70,10 +70,10 @@ class PollUpdateAction(
         return super().validate_fields(instance)
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        poll = self.sql.get(
+            self.model.collection, instance["id"],
             ["state", "type", "entitled_users_at_stop", "content_object_id"],
-        )
+        ) or {}
 
         self.check_entitled_users_at_stop(instance, poll)
 
@@ -169,10 +169,10 @@ class PollUpdateAction(
         if "pollmethod" in instance:
             pollmethod = instance["pollmethod"]
         else:
-            poll = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            poll = self.sql.get(
+                self.model.collection, instance["id"],
                 ["pollmethod"],
-            )
+            ) or {}
             pollmethod = poll.get("pollmethod")
         base_check_onehundred_percent_base(pollmethod, onehundred_percent_base)
 

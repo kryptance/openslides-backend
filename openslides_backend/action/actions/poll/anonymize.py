@@ -3,9 +3,7 @@ from typing import Any
 from openslides_backend.action.mixins.extend_history_mixin import ExtendHistoryMixin
 
 from ....models.models import Poll
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -42,9 +40,7 @@ class PollAnonymize(
             yield instance
 
     def check_allowed(self, poll_id: int) -> None:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id("poll", poll_id), ["type", "state"]
-        )
+        poll = self.sql.get("poll", poll_id, ["type", "state"]) or {}
 
         if not poll.get("state") in (Poll.STATE_FINISHED, Poll.STATE_PUBLISHED):
             raise ActionException(
@@ -54,19 +50,18 @@ class PollAnonymize(
             raise ActionException("You can only anonymize named polls.")
 
     def _get_option_ids(self, poll_id: int) -> list[int]:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, poll_id),
-            ["option_ids", "global_option_id"],
-        )
+        poll = self.sql.get(
+            self.model.collection, poll_id, ["option_ids", "global_option_id"]
+        ) or {}
         option_ids = poll.get("option_ids", [])
         if poll.get("global_option_id"):
             option_ids.append(poll["global_option_id"])
         return option_ids
 
     def _get_options(self, option_ids: list[int]) -> dict[int, dict[str, Any]]:
-        get_many_request = GetManyRequest("option", option_ids, ["vote_ids"])
-        gm_result = self.datastore.get_many([get_many_request])
-        options: dict[int, dict[str, Any]] = gm_result.get("option", {})
+        options: dict[int, dict[str, Any]] = self.sql.get_many(
+            "option", option_ids, ["vote_ids"]
+        ) if option_ids else {}
         return options
 
     def _remove_user_id_from(self, vote_ids: list[int]) -> None:

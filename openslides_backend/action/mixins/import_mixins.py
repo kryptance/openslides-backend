@@ -406,7 +406,8 @@ class BaseJsonUploadAction(BaseImportJsonUploadAction):
             self.import_state = ImportState.DONE
 
     def store_rows_in_the_import_preview(self, import_name: str) -> None:
-        self.new_store_id = self.datastore.reserve_id(collection="import_preview")
+        # Use sql.reserve_id for direct database access
+        self.new_store_id = self.sql.reserve_id(collection="import_preview")
         fqid = fqid_from_collection_and_id("import_preview", self.new_store_id)
         time_created = datetime.now(ZoneInfo("UTC"))
         result: dict[str, list[dict[str, Any]] | int] = {"rows": self.rows}

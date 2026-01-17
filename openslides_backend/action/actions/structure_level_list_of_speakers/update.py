@@ -4,7 +4,6 @@ from typing import Any
 from openslides_backend.action.generics.update import UpdateAction
 from openslides_backend.permissions.permissions import Permissions
 from openslides_backend.shared.exceptions import ActionException
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
 
 from ....models.models import StructureLevelListOfSpeakers
 from ...util.default_schema import DefaultSchema
@@ -51,9 +50,9 @@ class StructureLevelListOfSpeakersUpdateAction(UpdateAction):
             instance["current_start_time"] = datetime.fromtimestamp(t)
 
         if spoken_time := instance.pop("spoken_time", None):
-            db_instance = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            db_instance = self.sql.get(
+                self.model.collection, instance["id"],
                 ["remaining_time"],
-            )
+            ) or {}
             instance["remaining_time"] = db_instance["remaining_time"] - spoken_time
         return instance

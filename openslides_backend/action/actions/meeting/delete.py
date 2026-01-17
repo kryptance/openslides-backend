@@ -1,7 +1,6 @@
 from typing import Any
 
 from ....models.models import Meeting
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -20,8 +19,8 @@ class MeetingDelete(DeleteAction, MeetingPermissionMixin):
     action_name = "delete"
 
     def get_committee_id(self, instance: dict[str, Any]) -> int:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        meeting = self.sql.get(
+            self.model.collection, instance["id"],
             ["committee_id"],
-        )
+        ) or {}
         return meeting["committee_id"]

@@ -74,11 +74,11 @@ class MotionCreateForwardedAmendment(BaseMotionCreateForwarded):
         super().check_permissions(instance)
 
         # check if origin motion is normal or statute_amendment
-        origin = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["origin_id"]),
+        origin = self.sql.get(
+            self.model.collection, instance["origin_id"],
             ["lead_motion_id"],
             lock_result=False,
-        )
+        ) or {}
         if not origin.get("lead_motion_id"):
             msg = "Can only forward amendments in internal forward."
             raise PermissionDenied(msg)

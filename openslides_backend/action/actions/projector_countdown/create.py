@@ -4,7 +4,6 @@ from ....models.models import ProjectorCountdown
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.create import CreateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -31,11 +30,11 @@ class ProjectorCountdownCreate(CreateAction):
 
         # set default_time if needed and countdown_time
         if instance.get("default_time") is None:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+            meeting = self.sql.get(
+                "meeting", instance["meeting_id"],
                 ["projector_countdown_default_time"],
                 lock_result=False,
-            )
+            ) or {}
             instance["default_time"] = meeting.get("projector_countdown_default_time")
         instance["countdown_time"] = instance["default_time"]
         return instance
@@ -45,5 +44,5 @@ class ProjectorCountdownCreate(CreateAction):
             FilterOperator("meeting_id", "=", instance["meeting_id"]),
             FilterOperator("title", "=", instance["title"]),
         )
-        if self.datastore.exists(self.model.collection, title_filter):
+        if self.sql.exists(self.model.collection, title_filter):
             raise ActionException("Title already exists in this meeting.")

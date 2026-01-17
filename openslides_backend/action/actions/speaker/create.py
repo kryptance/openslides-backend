@@ -57,8 +57,9 @@ class SpeakerCreateAction(
         answer_to: int | None = instance.pop("answer_to_id", None)
         origin: dict[str, Any] = {}
         if answer_to:
-            origin = self.datastore.get(
-                fqid_from_collection_and_id("speaker", answer_to),
+            origin = self.sql.get(
+                "speaker",
+                answer_to,
                 [
                     "weight",
                     "list_of_speakers_id",
@@ -67,7 +68,7 @@ class SpeakerCreateAction(
                     "end_time",
                     "answer",
                 ],
-            )
+            ) or {}
             if origin["list_of_speakers_id"] != instance["list_of_speakers_id"]:
                 raise ActionException(
                     "Cannot create answer for speaker in different list."
@@ -111,18 +112,19 @@ class SpeakerCreateAction(
             instance["weight"] = max_weight + 1
             return instance
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             [
                 "list_of_speakers_enable_point_of_order_categories",
                 "point_of_order_category_ids",
             ],
-        )
+        ) or {}
         if answer_to:
             weight = origin["weight"] + 1
             if origin.get("begin_time"):
                 weight = 1
-            weight = self.datastore.min(
+            weight = self.sql.min(
                 collection="speaker",
                 filter_=And(
                     FilterOperator("list_of_speakers_id", "=", list_of_speakers_id),
@@ -169,26 +171,21 @@ class SpeakerCreateAction(
             "list_of_speakers_enable_point_of_order_categories"
         ):
             # fetch point of order categories
-            result = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "point_of_order_category",
-                        meeting["point_of_order_category_ids"],
-                        ["rank"],
-                    )
-                ]
+            categories = self.sql.get_many(
+                "point_of_order_category",
+                meeting.get("point_of_order_category_ids", []),
+                ["rank"],
             )
-            categories = result.get("point_of_order_category", {})
 
             filter = And(
                 FilterOperator("list_of_speakers_id", "=", list_of_speakers_id),
                 FilterOperator("begin_time", "=", None),
                 FilterOperator("meeting_id", "=", instance["meeting_id"]),
             )
-            speakers = self.datastore.filter(
+            speakers = self.sql.filter(
                 self.model.collection,
                 filter_=filter,
-                mapped_fields=[
+                fields=[
                     "id",
                     "weight",
                     "point_of_order",
@@ -252,10 +249,10 @@ class SpeakerCreateAction(
             FilterOperator("begin_time", "=", None),
             FilterOperator("meeting_id", "=", meeting_id),
         )
-        speakers = self.datastore.filter(
+        speakers = self.sql.filter(
             self.model.collection,
             filter_=filter,
-            mapped_fields=["id", "weight"],
+            fields=["id", "weight"],
         )
         los = sorted(speakers.values(), key=lambda k: k["weight"])
         list_to_sort = []
@@ -266,7 +263,7 @@ class SpeakerCreateAction(
         return list_to_sort
 
     def _get_max_weight(self, list_of_speakers_id: int, meeting_id: int) -> int | None:
-        return self.datastore.max(
+        return self.sql.max(
             collection="speaker",
             filter_=And(
                 FilterOperator("list_of_speakers_id", "=", list_of_speakers_id),
@@ -308,7 +305,7 @@ class SpeakerCreateAction(
                     FilterOperator("point_of_order", "=", None),
                 )
             )
-        return self.datastore.min(
+        return self.sql.min(
             collection="speaker",
             filter_=And(
                 FilterOperator("list_of_speakers_id", "=", list_of_speakers_id),
@@ -329,13 +326,12 @@ class SpeakerCreateAction(
         - that request-user cannot create a speaker without being point_of_order, a not closed los is closed and no list_of_speakers.can_manage permission
         """
         if "meeting_user_id" in instance:
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id(
-                    "meeting_user", instance["meeting_user_id"]
-                ),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                instance["meeting_user_id"],
                 ["user_id"],
-            )
-            user_id = meeting_user["user_id"]
+            ) or {}
+            user_id = meeting_user.get("user_id")
         else:
             if instance.get("speech_state") not in [
                 SpeechState.INTERPOSED_QUESTION,
@@ -349,14 +345,15 @@ class SpeakerCreateAction(
                 "Speaker can't be point of order and another speech state at the same time."
             )
 
-        los_fqid = fqid_from_collection_and_id(
-            "list_of_speakers", instance["list_of_speakers_id"]
-        )
-        los = self.datastore.get(los_fqid, ["meeting_id", "closed"])
-        meeting_id = los["meeting_id"]
-        meeting_fqid = fqid_from_collection_and_id("meeting", meeting_id)
-        meeting = self.datastore.get(
-            meeting_fqid,
+        los = self.sql.get(
+            "list_of_speakers",
+            instance["list_of_speakers_id"],
+            ["meeting_id", "closed"],
+        ) or {}
+        meeting_id = los.get("meeting_id")
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             [
                 "list_of_speakers_enable_point_of_order_speakers",
                 "list_of_speakers_can_create_point_of_order_for_others",
@@ -365,7 +362,7 @@ class SpeakerCreateAction(
                 "list_of_speakers_closing_disables_point_of_order",
                 "list_of_speakers_allow_multiple_speakers",
             ],
-        )
+        ) or {}
         self.check_point_of_order_fields(instance, meeting, user_id)
 
         if (
@@ -386,8 +383,7 @@ class SpeakerCreateAction(
 
         if "meeting_user_id" in instance:
             if meeting.get("list_of_speakers_present_users_only"):
-                user_fqid = fqid_from_collection_and_id("user", user_id)
-                user = self.datastore.get(user_fqid, ["is_present_in_meeting_ids"])
+                user = self.sql.get("user", user_id, ["is_present_in_meeting_ids"]) or {}
                 if meeting_id not in user.get("is_present_in_meeting_ids", ()):
                     raise ActionException(
                         "Only present users can be on the list of speakers."
@@ -417,11 +413,11 @@ class SpeakerCreateAction(
                     ),
                     poo_filter,
                 )
-                if self.datastore.exists("speaker", filter_obj):
+                if self.sql.exists("speaker", filter_obj):
                     raise ActionException(
                         f"User {user_id} is already on the list of speakers."
                     )
-        if instance.get("answer_to_id") and not self.datastore.exists(
+        if instance.get("answer_to_id") and not self.sql.exists(
             "speaker",
             And(
                 FilterOperator(
@@ -439,12 +435,11 @@ class SpeakerCreateAction(
         meeting_id = self.get_meeting_id(instance)
         permission = Permissions.ListOfSpeakers.CAN_MANAGE
         if "meeting_user_id" in instance:
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id(
-                    "meeting_user", instance["meeting_user_id"]
-                ),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                instance["meeting_user_id"],
                 ["user_id"],
-            )
+            ) or {}
             restricted = self.check_delegator_restriction(
                 "users_forbid_delegator_in_list_of_speakers", [meeting_id]
             )

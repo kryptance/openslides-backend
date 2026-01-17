@@ -3,7 +3,6 @@ from typing import Any, cast
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
 from ....shared.filters import FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.import_mixins import (
     BaseImportAction,
     ImportRow,
@@ -98,11 +97,11 @@ class TopicImport(BaseImportAction):
 
     def get_meeting_id(self, instance: dict[str, Any]) -> int:
         store_id = instance["id"]
-        worker = self.datastore.get(
-            fqid_from_collection_and_id("import_preview", store_id),
+        worker = self.sql.get(
+            "import_preview", store_id,
             ["name", "result"],
             lock_result=False,
-        )
+        ) or {}
         if worker.get("name") == TopicImport.import_name:
             return next(iter(worker.get("result", {})["rows"]))["data"]["meeting_id"]
         raise ActionException("Import data cannot be found.")

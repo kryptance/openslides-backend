@@ -2,7 +2,6 @@ from typing import Any
 
 from ....models.models import MeetingUser
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.action_type import ActionType
 from ...util.default_schema import DefaultSchema
@@ -47,10 +46,11 @@ class MeetingUserSetData(
         meeting_id = instance.get("meeting_id")
         user_id = instance.pop("user_id", None)
         if instance.get("id"):
-            fqid = fqid_from_collection_and_id("meeting_user", instance["id"])
-            meeting_user = self.datastore.get(
-                fqid, ["meeting_id", "user_id"], raise_exception=True
-            )
+            meeting_user = self.sql.get(
+                "meeting_user", instance["id"],
+                ["meeting_id", "user_id"],
+                raise_exception=True
+            ) or {}
             if meeting_id:
                 assert (
                     meeting_id == meeting_user["meeting_id"]

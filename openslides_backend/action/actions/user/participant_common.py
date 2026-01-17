@@ -14,7 +14,6 @@ from openslides_backend.shared.exceptions import MissingPermission
 from openslides_backend.shared.mixins.user_create_update_permissions_mixin import (
     PermissionVarStore,
 )
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
 
 from ....shared.filters import And, FilterOperator, Or
 from ..meeting_user.mixin import CheckLockOutPermissionMixin
@@ -26,11 +25,12 @@ class ParticipantCommon(BaseImportJsonUploadAction, CheckLockOutPermissionMixin)
     def check_permissions(self, instance: dict[str, Any]) -> None:
         permstore = PermissionVarStore(self.datastore, self.user_id)
         if self.meeting_id not in permstore.user_meetings:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", self.meeting_id),
+            meeting = self.sql.get(
+                "meeting",
+                self.meeting_id,
                 ["committee_id", "locked_from_inside"],
                 lock_result=False,
-            )
+            ) or {}
             if meeting.get("locked_from_inside"):
                 raise MissingPermission(
                     {
@@ -57,10 +57,11 @@ class ParticipantCommon(BaseImportJsonUploadAction, CheckLockOutPermissionMixin)
         }
         if not len(update_rows):
             return True
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["admin_group_id", "template_for_organization_id"],
-        )
+        ) or {}
         if meeting.get("template_for_organization_id"):
             return True
         user_ids_to_group_ids: dict[int, list[int]] = {
@@ -108,13 +109,14 @@ class ParticipantCommon(BaseImportJsonUploadAction, CheckLockOutPermissionMixin)
                     for user_id in user_ids_to_group_ids
                 ),
             )
-            meeting_users = self.datastore.filter(
+            meeting_users = self.sql.filter(
                 "meeting_user", filters, ["group_ids", "user_id"]
             )
-            group = self.datastore.get(
-                fqid_from_collection_and_id("group", admin_group_id),
+            group = self.sql.get(
+                "group",
+                admin_group_id,
                 ["id", "meeting_user_ids"],
-            )
+            ) or {}
             if group.get("meeting_user_ids", []) and not any(
                 m_user_id not in meeting_users
                 for m_user_id in group.get("meeting_user_ids", [])

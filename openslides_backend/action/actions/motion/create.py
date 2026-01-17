@@ -7,9 +7,7 @@ from ....models.models import Motion
 from ....permissions.base_classes import Permission
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, MissingPermission, PermissionDenied
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import (
     id_list_schema,
     number_string_json_schema,
@@ -65,34 +63,31 @@ class MotionCreate(
     history_information = "Motion created"
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
+        meeting_ids = list(
+            {
+                instance["meeting_id"]
+                for instance in action_data
+                if instance.get("meeting_id")
+            }
+        )
+        self.sql.get_many(
+            "meeting",
+            meeting_ids,
             [
-                GetManyRequest(
-                    "meeting",
-                    list(
-                        {
-                            instance["meeting_id"]
-                            for instance in action_data
-                            if instance.get("meeting_id")
-                        }
-                    ),
-                    [
-                        "is_active_in_organization_id",
-                        "name",
-                        "id",
-                        "motions_default_workflow_id",
-                        "motions_default_amendment_workflow_id",
-                        "motions_reason_required",
-                        "motion_submitter_ids",
-                        "motions_number_type",
-                        "agenda_item_creation",
-                        "agenda_item_ids",
-                        "list_of_speakers_initially_closed",
-                        "list_of_speakers_ids",
-                        "motion_ids",
-                    ],
-                )
-            ]
+                "is_active_in_organization_id",
+                "name",
+                "id",
+                "motions_default_workflow_id",
+                "motions_default_amendment_workflow_id",
+                "motions_reason_required",
+                "motion_submitter_ids",
+                "motions_number_type",
+                "agenda_item_creation",
+                "agenda_item_ids",
+                "list_of_speakers_initially_closed",
+                "list_of_speakers_ids",
+                "motion_ids",
+            ],
         )
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
@@ -112,22 +107,22 @@ class MotionCreate(
             instance["amendment_paragraphs"] = Jsonb(amendment_paragraphs)
         # if amendment and no category set, use category from the lead motion
         if instance.get("lead_motion_id") and "category_id" not in instance:
-            lead_motion = self.datastore.get(
-                fqid_from_collection_and_id(
-                    self.model.collection, instance["lead_motion_id"]
-                ),
+            lead_motion = self.sql.get(
+                self.model.collection,
+                instance["lead_motion_id"],
                 ["category_id"],
-            )
+            ) or {}
             instance["category_id"] = lead_motion.get("category_id")
 
         # fetch all needed settings and check reason
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             [
                 "motions_default_workflow_id",
                 "motions_default_amendment_workflow_id",
             ],
-        )
+        ) or {}
 
         self.set_state_from_workflow(instance, meeting)
         self.create_submitters(instance)

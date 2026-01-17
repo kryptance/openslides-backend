@@ -67,7 +67,7 @@ class ProjectorToggle(WeightMixin, UpdateAction):
                     filter_ = And(
                         filter_, FilterOperator("type", "=", instance["type"])
                     )
-                result = self.datastore.filter("projection", filter_, ["id"])
+                result = self.sql.filter("projection", filter_, ["id"])
                 if result:
                     projection_ids = [id_ for id_ in result]
                     if stable:
@@ -123,7 +123,7 @@ class ProjectorToggle(WeightMixin, UpdateAction):
             FilterOperator("current_projector_id", "=", projector_id),
             FilterOperator("stable", "=", False),
         )
-        result = self.datastore.filter("projection", filter_, ["id"])
+        result = self.sql.filter("projection", filter_, ["id"])
         if result:
             self.move_projections_to_history(
                 meeting_id, projector_id, [int(id_) for id_ in result]

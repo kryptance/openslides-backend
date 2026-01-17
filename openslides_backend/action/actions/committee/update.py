@@ -60,21 +60,17 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
                 }
             )
             if parent_change_ids:
-                db_instances = self.datastore.get_many(
+                db_instances = self.sql.get_many(
+                    "committee",
+                    parent_change_ids,
                     [
-                        GetManyRequest(
-                            "committee",
-                            parent_change_ids,
-                            [
-                                "id",
-                                "parent_id",
-                                "child_ids",
-                                "all_parent_ids",
-                                "all_child_ids",
-                            ],
-                        )
-                    ]
-                )["committee"]
+                        "id",
+                        "parent_id",
+                        "child_ids",
+                        "all_parent_ids",
+                        "all_child_ids",
+                    ],
+                )
                 all_other_ids = {
                     id_
                     for db_inst in db_instances.values()
@@ -86,15 +82,11 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
                 all_other_ids.difference_update(db_instances)
                 if all_other_ids:
                     db_instances.update(
-                        self.datastore.get_many(
-                            [
-                                GetManyRequest(
-                                    "committee",
-                                    list(all_other_ids),
-                                    ["parent_id", "child_ids"],
-                                )
-                            ]
-                        )["committee"]
+                        self.sql.get_many(
+                            "committee",
+                            list(all_other_ids),
+                            ["parent_id", "child_ids"],
+                        )
                     )
                 relevant_tree: dict[int, tuple[int | None, list[int]]] = (
                     {}
@@ -148,11 +140,12 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
         return instance
 
     def check_meeting_in_committee(self, meeting_id: int, committee_id: int) -> None:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["committee_id"],
             lock_result=False,
-        )
+        ) or {}
         if meeting.get("committee_id") != committee_id:
             raise ActionException(
                 f"Meeting {meeting_id} does not belong to committee {committee_id}"
@@ -175,30 +168,29 @@ class CommitteeUpdateAction(CommitteeCommonCreateUpdateMixin, UpdateAction):
 
             child_id = instance["id"]
             parent_id = instance["parent_id"]
-            data = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        "committee",
-                        [parent_id, child_id],
-                        ["all_parent_ids"],
-                    ),
-                    GetManyRequest(
-                        "user", [self.user_id], ["committee_management_ids"]
-                    ),
-                ],
+            committees_data = self.sql.get_many(
+                "committee",
+                [parent_id, child_id],
+                ["all_parent_ids"],
                 lock_result=False,
             )
+            user_data = self.sql.get(
+                "user",
+                self.user_id,
+                ["committee_management_ids"],
+                lock_result=False,
+            ) or {}
             parent_intersection = set(
-                data["committee"][child_id].get("all_parent_ids", [])
+                committees_data.get(child_id, {}).get("all_parent_ids", [])
             ).intersection(
-                [*data["committee"][parent_id].get("all_parent_ids", []), parent_id]
+                [*committees_data.get(parent_id, {}).get("all_parent_ids", []), parent_id]
             )
             if not len(parent_intersection):
                 raise MissingPermission(
                     OrganizationManagementLevel.CAN_MANAGE_ORGANIZATION
                 )
             permitted_ids = set(
-                data["user"][self.user_id].get("committee_management_ids", [])
+                user_data.get("committee_management_ids", [])
             ).intersection(parent_intersection)
             if not len(permitted_ids):
                 raise MissingPermission(

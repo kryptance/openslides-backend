@@ -1,7 +1,5 @@
 from typing import Any
 
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
-
 from ....models.models import MeetingUser
 from ...generics.update import UpdateAction
 from ...util.action_type import ActionType
@@ -46,9 +44,9 @@ class MeetingUserUpdate(
     )
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        m_user = self.datastore.get(
-            fqid_from_collection_and_id("meeting_user", instance["id"]),
+        m_user = self.sql.get(
+            "meeting_user", instance["id"],
             ["meeting_id", "user_id"],
-        )
+        ) or {}
         self.check_locking_status(m_user["meeting_id"], instance, m_user["user_id"])
         return super().update_instance(instance)

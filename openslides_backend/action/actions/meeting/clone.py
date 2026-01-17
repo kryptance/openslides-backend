@@ -9,7 +9,6 @@ from openslides_backend.models.checker import (
     external_motion_fields,
 )
 from openslides_backend.models.models import Meeting, MeetingUser
-from openslides_backend.services.database.interface import GetManyRequest
 from openslides_backend.shared.exceptions import ActionException, PermissionDenied
 from openslides_backend.shared.interfaces.event import Event, EventType
 from openslides_backend.shared.patterns import fqid_from_collection_and_id
@@ -53,24 +52,19 @@ class MeetingClone(MeetingImport):
     action_name = "clone"
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
+        self.sql.get_many(
+            "meeting",
+            list({instance["meeting_id"] for instance in action_data}),
+            ["committee_id"],
+        )
+        self.sql.get(
+            "organization",
+            ONE_ORGANIZATION_ID,
             [
-                GetManyRequest(
-                    "meeting",
-                    list({instance["meeting_id"] for instance in action_data}),
-                    ["committee_id"],
-                ),
-                GetManyRequest(
-                    "organization",
-                    [ONE_ORGANIZATION_ID],
-                    [
-                        "active_meeting_ids",
-                        "archived_meeting_ids",
-                        "limit_of_meetings",
-                    ],
-                ),
+                "active_meeting_ids",
+                "archived_meeting_ids",
+                "limit_of_meetings",
             ],
-            use_changed_models=False,
         )
 
     def preprocess_data(self, instance: dict[str, Any]) -> dict[str, Any]:
@@ -79,12 +73,13 @@ class MeetingClone(MeetingImport):
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         if "committee_id" in instance:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+            meeting = self.sql.get(
+                "meeting",
+                instance["meeting_id"],
                 ["committee_id", "template_for_organization_id"],
                 lock_result=False,
-            )
-            if meeting["committee_id"] != instance["committee_id"] and not meeting.get(
+            ) or {}
+            if meeting.get("committee_id") != instance["committee_id"] and not meeting.get(
                 "template_for_organization_id"
             ):
                 raise PermissionDenied(
@@ -207,16 +202,11 @@ class MeetingClone(MeetingImport):
             self.replace_map["mediafile"].update(orga_mediafiles_replace_map)
 
         self.duplicate_mediafiles(meeting_json["mediafile"])
-        orga_wide_mediafiles = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "mediafile",
-                    list(orga_mediafiles_replace_map),
-                    ["meeting_mediafile_ids"],
-                )
-            ],
-            use_changed_models=False,
-        )["mediafile"]
+        orga_wide_mediafiles = self.sql.get_many(
+            "mediafile",
+            list(orga_mediafiles_replace_map),
+            ["meeting_mediafile_ids"],
+        ) if orga_mediafiles_replace_map else {}
         updated_orga_wide_mediafiles = {
             str(mediafile_id): {
                 "id": mediafile_id,
@@ -344,10 +334,10 @@ class MeetingClone(MeetingImport):
         if instance.get("committee_id"):
             return instance["committee_id"]
         else:
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+            meeting = self.sql.get(
+                "meeting",
+                instance["meeting_id"],
                 ["committee_id"],
                 lock_result=False,
-                use_changed_models=False,
-            )
+            ) or {}
             return meeting["committee_id"]

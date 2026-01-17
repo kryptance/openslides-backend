@@ -81,16 +81,16 @@ class OrganizationInitialImport(SingularActionMixin, Action):
         for collection, models in data.items():
             if collection == "_migration_index":
                 continue
-            self.datastore.reserve_ids(collection, len(models))
+            self.sql.reserve_ids(collection, len(models))
 
         return instance
 
     def check_empty_datastore(self) -> None:
         filter_ = FilterOperator("id", ">=", 1)
-        if self.datastore.exists(
+        if self.sql.exists(
             "organization",
             filter_,
-            False,
+            lock_result=False,
         ):
             raise ActionException("Datastore is not empty.")
 

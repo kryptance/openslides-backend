@@ -11,7 +11,6 @@ from ....permissions.permission_helper import (
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException, PermissionDenied
 from ....shared.filters import And, Filter, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import required_id_schema
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -42,10 +41,11 @@ class UserTogglePresenceByNumber(UpdateAction, CheckForArchivedMeetingMixin):
 
         instance["id"] = self.find_user_to_number(meeting_id, number)
 
-        user = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        user = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["is_present_in_meeting_ids"],
-        )
+        ) or {}
         is_present = user.get("is_present_in_meeting_ids", [])
         if meeting_id not in is_present:
             instance["is_present_in_meeting_ids"] = user.get(
@@ -61,7 +61,7 @@ class UserTogglePresenceByNumber(UpdateAction, CheckForArchivedMeetingMixin):
             FilterOperator("number", "=", number),
             FilterOperator("meeting_id", "=", meeting_id),
         )
-        result = self.datastore.filter("meeting_user", filter_, ["user_id"])
+        result = self.sql.filter("meeting_user", filter_, ["user_id"])
         if len(result.keys()) == 1:
             return list(result.values())[0]["user_id"]
         elif len(result.keys()) > 1:
@@ -82,11 +82,12 @@ class UserTogglePresenceByNumber(UpdateAction, CheckForArchivedMeetingMixin):
             instance["meeting_id"],
         ):
             return
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             ["committee_id", "locked_from_inside"],
             lock_result=False,
-        )
+        ) or {}
         if not meeting.get("locked_from_inside"):
             if has_organization_management_level(
                 self.datastore,

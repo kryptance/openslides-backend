@@ -7,7 +7,6 @@ from ....permissions.management_levels import (
 )
 from ....permissions.permission_helper import has_committee_management_level
 from ....shared.exceptions import MissingPermission
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.util import ONE_ORGANIZATION_ID
 from ...generics.create import CreateAction
 from ...util.default_schema import DefaultSchema
@@ -56,11 +55,12 @@ class CommitteeCreate(CommitteeCommonCreateUpdateMixin, CreateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         if "parent_id" in instance:
+            parent = self.sql.get(
+                "committee", instance["parent_id"],
+                ["all_parent_ids"],
+            ) or {}
             instance["all_parent_ids"] = [
-                *self.datastore.get(
-                    fqid_from_collection_and_id("committee", instance["parent_id"]),
-                    ["all_parent_ids"],
-                ).get("all_parent_ids", []),
+                *parent.get("all_parent_ids", []),
                 instance["parent_id"],
             ]
         return super().update_instance(instance)

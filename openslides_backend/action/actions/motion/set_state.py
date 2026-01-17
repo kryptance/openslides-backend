@@ -36,8 +36,9 @@ class MotionSetStateAction(
         Check if the state_id is from a previous or next state.
         """
         fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
-        motion = self.datastore.get(
-            fqid,
+        motion = self.sql.get(
+            self.model.collection,
+            instance["id"],
             [
                 "state_id",
                 "meeting_id",
@@ -47,17 +48,17 @@ class MotionSetStateAction(
                 "number_value",
                 "workflow_timestamp",
             ],
-            lock_result=["state_id"],
-        )
+        ) or {}
         self.apply_instance(motion, fqid)
         state_id = motion["state_id"]
 
         if not self.skip_state_graph_check:
-            motion_state = self.datastore.get(
-                fqid_from_collection_and_id("motion_state", state_id),
+            motion_state = self.sql.get(
+                "motion_state",
+                state_id,
                 ["next_state_ids", "previous_state_ids"],
                 lock_result=False,
-            )
+            ) or {}
             if instance["state_id"] not in (
                 motion_state.get("next_state_ids", [])
                 + motion_state.get("previous_state_ids", [])
@@ -83,15 +84,16 @@ class MotionSetStateAction(
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
         self.skip_state_graph_check = False
-        motion = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["id"]),
+        motion = self.sql.get(
+            "motion",
+            instance["id"],
             [
                 "state_id",
                 "submitter_ids",
                 "meeting_id",
             ],
             lock_result=False,
-        )
+        ) or {}
         if has_perm(
             self.datastore,
             self.user_id,
@@ -107,10 +109,11 @@ class MotionSetStateAction(
             Permissions.Motion.CAN_SEE,
             motion["meeting_id"],
         ):
-            state = self.datastore.get(
-                fqid_from_collection_and_id("motion_state", motion["state_id"]),
+            state = self.sql.get(
+                "motion_state",
+                motion["state_id"],
                 ["submitter_withdraw_state_id"],
-            )
+            ) or {}
             if instance["state_id"] == state.get("submitter_withdraw_state_id"):
                 self.skip_state_graph_check = True
                 return

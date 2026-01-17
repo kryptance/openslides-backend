@@ -7,7 +7,6 @@ from openslides_backend.action.mixins.singular_action_mixin import SingularActio
 from ....models.models import Speaker
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -24,8 +23,8 @@ class SpeakerPause(SingularActionMixin, CountdownControl, UpdateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        db_instance = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        db_instance = self.sql.get(
+            self.model.collection, instance["id"],
             [
                 "begin_time",
                 "end_time",
@@ -36,7 +35,7 @@ class SpeakerPause(SingularActionMixin, CountdownControl, UpdateAction):
                 "structure_level_list_of_speakers_id",
                 "point_of_order",
             ],
-        )
+        ) or {}
         if (
             db_instance.get("begin_time") is None
             or db_instance.get("end_time") is not None

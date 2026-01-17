@@ -4,7 +4,7 @@ from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from openslides_backend.shared.util import ONE_ORGANIZATION_FQID
+from openslides_backend.shared.util import ONE_ORGANIZATION_ID
 
 from ....i18n.translator import translate as _
 from ....models.models import User
@@ -58,13 +58,13 @@ The link will be valid for 10 minutes."""
 
             # search for users with email
             filter_ = FilterOperator("email", "~=", email)
-            results = self.datastore.filter(
+            results = self.sql.filter(
                 self.model.collection, filter_, ["id", "username", "saml_id", "email"]
             )
 
-            organization = self.datastore.get(
-                ONE_ORGANIZATION_FQID, ["url"], lock_result=False
-            )
+            organization = self.sql.get(
+                "organization", ONE_ORGANIZATION_ID, ["url"], lock_result=False
+            ) or {}
             url = organization.get("url", "")
 
             # try to send the mails.

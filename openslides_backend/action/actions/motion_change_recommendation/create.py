@@ -42,7 +42,7 @@ class MotionChangeRecommendationCreateAction(
             raise ActionException("Starting line must be smaller than ending line.")
 
         instance = self.update_instance_with_meeting_id(instance)
-        exists = self.datastore.exists(
+        exists = self.sql.exists(
             self.model.collection,
             And(
                 FilterOperator("meeting_id", "=", instance["meeting_id"]),

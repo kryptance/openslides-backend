@@ -4,7 +4,6 @@ from typing import Any, TypedDict
 from openslides_backend.shared.patterns import (
     EXTENSION_REFERENCE_IDS_PATTERN,
     collection_and_id_from_fqid,
-    fqid_from_collection_and_id,
 )
 
 from .set_number_mixin import SetNumberMixin
@@ -56,10 +55,11 @@ class MotionBasePayloadValidationMixin(SetNumberMixin):
         return errors
 
     def check_reason_required(self, meeting_id: int) -> bool:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["motions_reason_required"],
-        )
+        ) or {}
         return meeting.get("motions_reason_required", False)
 
     def _check_recommendation_and_state(
@@ -141,10 +141,11 @@ class MotionCreatePayloadValidationMixin(MotionBasePayloadValidationMixin):
             errors.append(
                 {"type": MotionErrorType.REASON, "message": "Reason is required"}
             )
-        if "additional_submitter" in instance and not self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        if "additional_submitter" in instance and not (self.sql.get(
+            "meeting",
+            meeting_id,
             ["motions_create_enable_additional_submitter_text"],
-        ).get("motions_create_enable_additional_submitter_text"):
+        ) or {}).get("motions_create_enable_additional_submitter_text"):
             errors.append(
                 {
                     "type": MotionErrorType.ADDITIONAL_SUBMITTER,
@@ -156,13 +157,14 @@ class MotionCreatePayloadValidationMixin(MotionBasePayloadValidationMixin):
     def _create_conduct_after_checks(
         self, instance: dict[str, Any]
     ) -> list[MotionActionErrorData]:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             [
                 "motions_default_workflow_id",
                 "motions_default_amendment_workflow_id",
             ],
-        )
+        ) or {}
         workflow_id = instance.get("workflow_id", None)
         if workflow_id is None:
             if instance.get("lead_motion_id"):
@@ -197,10 +199,11 @@ class MotionUpdatePayloadValidationMixin(MotionBasePayloadValidationMixin):
     ) -> list[MotionActionErrorData]:
         errors: list[MotionActionErrorData] = []
         if instance.get("text") or instance.get("amendment_paragraphs"):
-            motion = self.datastore.get(
-                fqid_from_collection_and_id("motion", instance["id"]),
+            motion = self.sql.get(
+                "motion",
+                instance["id"],
                 ["text", "amendment_paragraphs"],
-            )
+            ) or {}
         if instance.get("text"):
             if not motion.get("text"):
                 errors.append(

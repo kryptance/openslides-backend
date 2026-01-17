@@ -1,9 +1,7 @@
 from typing import Any
 
 from ....models.models import AssignmentCandidate
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.create_action_with_inferred_meeting import (
     CreateActionWithInferredMeeting,
 )
@@ -29,28 +27,25 @@ class AssignmentCandidateCreate(PermissionMixin, CreateActionWithInferredMeeting
     relation_field_for_meeting = "assignment_id"
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "assignment",
-                    list(
-                        {
-                            instance["assignment_id"]
-                            for instance in action_data
-                            if instance.get("assignment_id")
-                        }
-                    ),
-                    ["meeting_id", "phase", "candidate_ids"],
-                )
-            ]
+        assignment_ids = list(
+            {
+                instance["assignment_id"]
+                for instance in action_data
+                if instance.get("assignment_id")
+            }
         )
+        self.sql.get_many(
+            "assignment",
+            assignment_ids,
+            ["meeting_id", "phase", "candidate_ids"],
+        ) if assignment_ids else {}
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        assignment = self.datastore.get(
-            fqid_from_collection_and_id("assignment", instance["assignment_id"]),
-            mapped_fields=["phase"],
-        )
+        assignment = self.sql.get(
+            "assignment", instance["assignment_id"],
+            ["phase"],
+        ) or {}
         if assignment.get("phase") == "finished":
             raise ActionException(
                 "It is not permitted to add a candidate to a finished assignment!"

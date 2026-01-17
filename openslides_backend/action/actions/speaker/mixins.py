@@ -3,12 +3,10 @@ from typing import Any
 from openslides_backend.action.actions.structure_level_list_of_speakers.create import (
     StructureLevelListOfSpeakersCreateAction,
 )
-from openslides_backend.services.database.commands import GetManyRequest
 
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import Action
 from .speech_state import SpeechState
 
@@ -23,8 +21,8 @@ class CheckSpeechState(Action):
         # check speech_state
         if meeting_id is None:
             meeting_id = instance["meeting_id"]
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting", meeting_id,
             [
                 "list_of_speakers_can_set_contribution_self",
                 "list_of_speakers_enable_pro_contra_speech",
@@ -32,7 +30,7 @@ class CheckSpeechState(Action):
                 "list_of_speakers_intervention_time",
             ],
             lock_result=False,
-        )
+        ) or {}
         has_can_manage = has_perm(
             self.datastore,
             self.user_id,
@@ -94,22 +92,14 @@ class StructureLevelMixin(Action):
             if structure_level_id := instance.pop("structure_level_id"):
                 # find the structure_level_list_of_speakers_id for this list_of_speakers and
                 # structure_level by checking the intersection of the two relations
-                result = self.datastore.get_many(
-                    [
-                        GetManyRequest(
-                            "list_of_speakers",
-                            [list_of_speakers_id],
-                            ["structure_level_list_of_speakers_ids"],
-                        ),
-                        GetManyRequest(
-                            "structure_level",
-                            [structure_level_id],
-                            ["structure_level_list_of_speakers_ids"],
-                        ),
-                    ]
-                )
-                los_model = result["list_of_speakers"][list_of_speakers_id]
-                structure_level = result["structure_level"][structure_level_id]
+                los_model = self.sql.get(
+                    "list_of_speakers", list_of_speakers_id,
+                    ["structure_level_list_of_speakers_ids"],
+                ) or {}
+                structure_level = self.sql.get(
+                    "structure_level", structure_level_id,
+                    ["structure_level_list_of_speakers_ids"],
+                ) or {}
                 los_set = set(los_model.get("structure_level_list_of_speakers_ids", []))
                 structure_level_set = set(
                     structure_level.get("structure_level_list_of_speakers_ids", [])

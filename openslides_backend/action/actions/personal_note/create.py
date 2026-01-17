@@ -56,7 +56,7 @@ class PersonalNoteCreateAction(
                 FilterOperator("user_id", "=", self.user_id),
                 FilterOperator("meeting_id", "=", instance["meeting_id"]),
             )
-            filtered_meeting_user = self.datastore.filter(
+            filtered_meeting_user = self.sql.filter(
                 "meeting_user", filter_, ["id", "personal_note_ids"]
             )
             if filtered_meeting_user:
@@ -84,8 +84,8 @@ class PersonalNoteCreateAction(
                 "content_object_id", "=", str(instance["content_object_id"])
             ),
         )
-        exists = self.datastore.exists(
-            collection=self.model.collection, filter_=filter_
+        exists = self.sql.exists(
+            self.model.collection, filter_
         )
         if exists:
             raise ActionException(

@@ -237,7 +237,7 @@ class CommitteeJsonUpload(
                         )
                     )
         results = (
-            self.datastore.filter(
+            self.sql.filter(
                 "meeting",
                 Or(*filters),
                 ["id", "name", "committee_id", "start_time", "end_time"],

@@ -60,7 +60,7 @@ class MediafileUploadAction(MediafileCreateMixin, CreateAction):
             if "token" not in instance:
                 continue
             tokens.append(instance.get("token"))
-            results = self.datastore.filter(
+            results = self.sql.filter(
                 self.model.collection,
                 And(
                     FilterOperator("token", "=", instance.get("token")),

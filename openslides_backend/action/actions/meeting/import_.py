@@ -22,7 +22,6 @@ from openslides_backend.permissions.management_levels import OrganizationManagem
 from openslides_backend.permissions.permission_helper import (
     has_organization_management_level,
 )
-from openslides_backend.services.database.interface import GetManyRequest
 from openslides_backend.shared.exceptions import ActionException, MissingPermission
 from openslides_backend.shared.filters import FilterOperator, Or
 from openslides_backend.shared.interfaces.event import EventType
@@ -119,40 +118,36 @@ class MeetingImport(
             raise MissingPermission(OrganizationManagementLevel.SUPERADMIN)
 
     def prefetch(self, action_data: ActionData) -> None:
-        requests = [
-            GetManyRequest(
-                "organization",
-                [ONE_ORGANIZATION_ID],
-                [
-                    "active_meeting_ids",
-                    "archived_meeting_ids",
-                    "committee_ids",
-                    "active_meeting_ids",
-                    "archived_meeting_ids",
-                    "template_meeting_ids",
-                    "organization_tag_ids",
-                    "limit_of_users",
-                    "limit_of_meetings",
-                    "user_ids",
-                ],
-            ),
-            GetManyRequest(
-                "committee",
-                list({instance["committee_id"] for instance in action_data}),
-                [
-                    "meeting_ids",
-                ],
-            ),
-        ]
+        self.sql.get_many(
+            "organization",
+            [ONE_ORGANIZATION_ID],
+            [
+                "active_meeting_ids",
+                "archived_meeting_ids",
+                "committee_ids",
+                "active_meeting_ids",
+                "archived_meeting_ids",
+                "template_meeting_ids",
+                "organization_tag_ids",
+                "limit_of_users",
+                "limit_of_meetings",
+                "user_ids",
+            ],
+            lock_result=False,
+        )
+        self.sql.get_many(
+            "committee",
+            list({instance["committee_id"] for instance in action_data}),
+            ["meeting_ids"],
+            lock_result=False,
+        )
         if self.user_id:
-            requests.append(
-                GetManyRequest(
-                    "user",
-                    [self.user_id],
-                    ["committee_ids", "committee_management_ids", "home_committee_id"],
-                ),
+            self.sql.get_many(
+                "user",
+                [self.user_id],
+                ["committee_ids", "committee_management_ids", "home_committee_id"],
+                lock_result=False,
             )
-        self.datastore.get_many(requests, use_changed_models=False)
 
     def preprocess_data(self, instance: dict[str, Any]) -> dict[str, Any]:
         self.check_one_meeting(instance)
@@ -312,12 +307,11 @@ class MeetingImport(
                 ]
             )
 
-            filtered_users = self.datastore.filter(
+            filtered_users = self.sql.filter(
                 "user",
                 filter_,
                 ["username", "first_name", "last_name", "email"],
                 lock_result=False,
-                use_changed_models=False,
             )
             filtered_users_dict = {
                 self.get_user_key(values): key for key, values in filtered_users.items()
@@ -349,14 +343,14 @@ class MeetingImport(
         for user_id in list(self.user_id_to_gender.keys()):
             if user_id in self.merge_user_map:
                 del self.user_id_to_gender[user_id]
-        genders = self.datastore.get_all("gender", ["id", "name"], lock_result=True)
+        genders = self.sql.get_all("gender", ["id", "name"], lock_result=True)
         gender_dict = {gender.get("name", ""): gender for gender in genders.values()}
         new_genders = list(
             {value for value in self.user_id_to_gender.values()}.difference(gender_dict)
         )
         if new_genders:
             new_genders.sort()  # fix order for tests
-            new_gender_ids = self.datastore.reserve_ids("gender", len(new_genders))
+            new_gender_ids = self.sql.reserve_ids("gender", len(new_genders))
             new_gender_dict = {
                 new_gender: {
                     "id": new_gender_id,
@@ -386,12 +380,12 @@ class MeetingImport(
     def check_limit_of_meetings(
         self, text: str = "import", text2: str = "active "
     ) -> None:
-        organization = self.datastore.get(
-            fqid_from_collection_and_id("organization", ONE_ORGANIZATION_ID),
+        organization = self.sql.get(
+            "organization",
+            ONE_ORGANIZATION_ID,
             ["active_meeting_ids", "limit_of_meetings"],
             lock_result=False,
-            use_changed_models=False,
-        )
+        ) or {}
         if (
             limit_of_meetings := organization.get("limit_of_meetings", 0)
         ) and limit_of_meetings == len(organization.get("active_meeting_ids", [])):
@@ -443,7 +437,7 @@ class MeetingImport(
             if collection.startswith("_") or not json_data[collection]:
                 continue
             if collection != "user":
-                new_ids = self.datastore.reserve_ids(
+                new_ids = self.sql.reserve_ids(
                     collection, len(json_data[collection])
                 )
                 for entry, new_id in zip(json_data[collection].values(), new_ids):
@@ -453,7 +447,7 @@ class MeetingImport(
                     amount := self.number_of_imported_users
                     - self.number_of_merged_users
                 ):
-                    new_user_ids = iter(self.datastore.reserve_ids("user", amount))
+                    new_user_ids = iter(self.sql.reserve_ids("user", amount))
                 for entry in json_data[collection].values():
                     if (user_id := entry["id"]) in self.merge_user_map:
                         replace_map[collection][user_id] = self.merge_user_map[user_id]
@@ -571,7 +565,7 @@ class MeetingImport(
                     ) + [admin_group_id]
                 break
         if not new_meeting_user_id:
-            new_meeting_user_id = self.datastore.reserve_id("meeting_user")
+            new_meeting_user_id = self.sql.reserve_id("meeting_user")
             data_json["meeting_user"] = data_json.get("meeting_user", {})
             data_json["meeting_user"][str(new_meeting_user_id)] = {
                 "id": new_meeting_user_id,
@@ -583,8 +577,10 @@ class MeetingImport(
             if not meeting.get("meeting_user_ids"):
                 meeting["meeting_user_ids"] = list()
             meeting["meeting_user_ids"].append(new_meeting_user_id)
-            request_user = self.datastore.get(
-                fqid_user := fqid_from_collection_and_id("user", self.user_id),
+            fqid_user = fqid_from_collection_and_id("user", self.user_id)
+            request_user = self.sql.get(
+                "user",
+                self.user_id,
                 [
                     "id",
                     "meeting_user_ids",
@@ -592,7 +588,7 @@ class MeetingImport(
                     "committee_ids",
                     "home_committee_id",
                 ],
-            )
+            ) or {}
             request_user.pop("meta_position", None)
             request_user["meeting_user_ids"] = (
                 request_user.get("meeting_user_ids") or []

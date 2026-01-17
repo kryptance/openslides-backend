@@ -1,6 +1,5 @@
 from typing import Any, cast
 
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator, Or
 from ...mixins.import_mixins import ImportRow, ImportState
@@ -45,7 +44,7 @@ class ParticipantImport(BaseUserImport, ParticipantCommon):
             if entry.get("info") == ImportState.NEW
         }
         if len(to_create):
-            self.newly_found_models[field_name] = self.datastore.filter(
+            self.newly_found_models[field_name] = self.sql.filter(
                 model_name,
                 And(
                     FilterOperator("meeting_id", "=", self.meeting_id),
@@ -212,24 +211,19 @@ class ParticipantImport(BaseUserImport, ParticipantCommon):
         super().setup_lookups()
         for field in ("groups", "structure_level"):
             singular_field = field.rstrip("s")
-            result = self.datastore.get_many(
-                [
-                    GetManyRequest(
-                        singular_field,
-                        list(
-                            {
-                                id
-                                for row in self.rows
-                                for instance in row["data"].get(field, [])
-                                if (id := instance.get("id"))
-                            }
-                        ),
-                        ["name"],
-                    )
-                ],
+            ids = list(
+                {
+                    id
+                    for row in self.rows
+                    for instance in row["data"].get(field, [])
+                    if (id := instance.get("id"))
+                }
+            )
+            result = self.sql.get_many(
+                singular_field, ids, ["name"],
                 lock_result=False,
                 use_changed_models=False,
-            )
+            ) if ids else {}
             self.lookups[field] = {
-                k: v["name"] for k, v in result.get(singular_field, {}).items()
+                k: v["name"] for k, v in result.items()
             }

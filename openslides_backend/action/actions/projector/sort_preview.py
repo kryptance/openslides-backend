@@ -3,7 +3,6 @@ from typing import Any
 from ....models.models import Projector
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import id_list_schema
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -37,10 +36,10 @@ class ProjectorSortPreview(UpdateAction):
         return []
 
     def check_preview_ids(self, instance: dict[str, Any]) -> None:
-        projector = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        projector = self.sql.get(
+            self.model.collection, instance["id"],
             ["preview_projection_ids"],
-        )
+        ) or {}
         if set(instance["projection_ids"]) != set(
             projector.get("preview_projection_ids", [])
         ):

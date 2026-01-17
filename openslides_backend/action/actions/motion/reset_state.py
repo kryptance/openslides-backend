@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 from ....models.models import Motion
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -27,8 +26,9 @@ class MotionResetStateAction(UpdateAction, SetNumberMixin):
         """
         Set state_id to motion_state.first_state_of_workflow_id.
         """
-        motion = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["id"]),
+        motion = self.sql.get(
+            "motion",
+            instance["id"],
             [
                 "state_id",
                 "meeting_id",
@@ -38,21 +38,23 @@ class MotionResetStateAction(UpdateAction, SetNumberMixin):
                 "number_value",
                 "workflow_timestamp",
             ],
-        )
+        ) or {}
         if not motion.get("state_id"):
             raise ActionException(f"Motion {instance['id']} has no state.")
 
-        old_state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", motion["state_id"]),
+        old_state = self.sql.get(
+            "motion_state",
+            motion["state_id"],
             ["workflow_id"],
-        )
+        ) or {}
         if not old_state.get("workflow_id"):
             raise ActionException(f"State {motion['state_id']} has no workflow.")
 
-        workflow = self.datastore.get(
-            fqid_from_collection_and_id("motion_workflow", old_state["workflow_id"]),
+        workflow = self.sql.get(
+            "motion_workflow",
+            old_state["workflow_id"],
             ["first_state_id"],
-        )
+        ) or {}
         instance["state_id"] = workflow.get("first_state_id")
         self.set_number(
             instance,

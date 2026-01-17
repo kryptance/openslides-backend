@@ -4,9 +4,7 @@ from zoneinfo import ZoneInfo
 
 from ....models.models import Motion, MotionCategory
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import ActionData
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -80,15 +78,13 @@ class MotionCategoryNumberMotions(UpdateAction):
     def init_memory(self, main_category_id: int) -> None:
         """Preload all categories with needed fields, all motions with needed fields
         and meeting with needed fields."""
-        category = self.datastore.get(
-            fqid_from_collection_and_id("motion_category", main_category_id),
-            ["meeting_id"],
-        )
+        category = self.sql.get("motion_category", main_category_id, ["meeting_id"]) or {}
         self.main_category_id = main_category_id
 
         if category.get("meeting_id"):
-            meeting = self.datastore.get(
-                fqid_from_collection_and_id("meeting", category["meeting_id"]),
+            meeting = self.sql.get(
+                "meeting",
+                category["meeting_id"],
                 [
                     "motion_ids",
                     "motion_category_ids",
@@ -96,29 +92,24 @@ class MotionCategoryNumberMotions(UpdateAction):
                     "motions_number_min_digits",
                     "motions_amendments_prefix",
                 ],
-            )
+            ) or {}
             self.meeting = meeting
         else:
             raise ActionException("Main category doesnt include meeting_id.")
 
-        gmr_categories = GetManyRequest(
+        category_ids = meeting.get("motion_category_ids", [])
+        motion_ids = meeting.get("motion_ids", [])
+
+        self.mem_categories = self.sql.get_many(
             "motion_category",
-            meeting.get("motion_category_ids", []),
+            category_ids,
             ["prefix", "parent_id", "child_ids", "weight", "motion_ids"],
-        )
-        gmr_motions = GetManyRequest(
+        ) if category_ids else {}
+        self.mem_motions = self.sql.get_many(
             "motion",
-            meeting.get("motion_ids", []),
-            [
-                "lead_motion_id",
-                "category_weight",
-                "category_id",
-                "number",
-            ],
-        )
-        result = self.datastore.get_many([gmr_categories, gmr_motions])
-        self.mem_categories = result.get("motion_category", {})
-        self.mem_motions = result.get("motion", {})
+            motion_ids,
+            ["lead_motion_id", "category_weight", "category_id", "number"],
+        ) if motion_ids else {}
         self.mem_meetings = {category.get("meeting_id"): meeting}
 
     def get_prefix(self, category_id: int) -> str:

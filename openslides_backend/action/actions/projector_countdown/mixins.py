@@ -8,7 +8,6 @@ from openslides_backend.action.actions.structure_level_list_of_speakers.update i
 )
 from openslides_backend.services.database.interface import PartialModel
 
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from .update import ProjectorCountdownUpdate
 
@@ -27,10 +26,10 @@ class CountdownControl(UpdateAction):
         command: CountdownCommand,
         default_time: int | None = None,
     ) -> None:
-        countdown = self.datastore.get(
-            fqid_from_collection_and_id("projector_countdown", countdown_id),
+        countdown = self.sql.get(
+            "projector_countdown", countdown_id,
             ["countdown_time", "default_time"],
-        )
+        ) or {}
         if default_time is not None:
             countdown["default_time"] = default_time
 
@@ -65,10 +64,10 @@ class CountdownControl(UpdateAction):
         command: CountdownCommand,
         default_time: int | None = None,
     ) -> None:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting", meeting_id,
             ["list_of_speakers_couple_countdown", "list_of_speakers_countdown_id"],
-        )
+        ) or {}
         if meeting.get("list_of_speakers_couple_countdown") and meeting.get(
             "list_of_speakers_countdown_id"
         ):

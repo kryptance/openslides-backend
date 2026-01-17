@@ -1,7 +1,6 @@
 from typing import Any
 
 from ....models.models import ListOfSpeakers
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.create_action_with_inferred_meeting import (
     CreateActionWithInferredMeeting,
 )
@@ -18,10 +17,10 @@ class ListOfSpeakersCreate(CreateActionWithInferredMeeting):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", instance["meeting_id"],
             ["list_of_speakers_initially_closed"],
             lock_result=False,
-        )
+        ) or {}
         instance["closed"] = meeting.get("list_of_speakers_initially_closed", False)
         return instance

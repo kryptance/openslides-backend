@@ -1,9 +1,7 @@
 from typing import Any
 
 from ....models.models import Option, Poll
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import decimal_schema
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
@@ -96,28 +94,28 @@ class OptionUpdateAction(UpdateAction):
     def _get_option_and_poll(
         self, option_id: int
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        option = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, option_id),
+        option = self.sql.get(
+            self.model.collection,
+            option_id,
             ["poll_id", "used_as_global_option_in_poll_id", "vote_ids", "meeting_id"],
-        )
-        return (
-            option,
-            self.datastore.get(
-                fqid_from_collection_and_id("poll", option["poll_id"]),
-                [
-                    "id",
-                    "state",
-                    "type",
-                    "pollmethod",
-                    "global_yes",
-                    "global_no",
-                    "global_abstain",
-                    "meeting_id",
-                    "content_object_id",
-                ],
-                lock_result=["type"],
-            ),
-        )
+        ) or {}
+        poll = self.sql.get(
+            "poll",
+            option["poll_id"],
+            [
+                "id",
+                "state",
+                "type",
+                "pollmethod",
+                "global_yes",
+                "global_no",
+                "global_abstain",
+                "meeting_id",
+                "content_object_id",
+            ],
+            lock_result=["type"],
+        ) or {}
+        return (option, poll)
 
     def _handle_poll_option_data(
         self, instance: dict[str, Any], poll: dict[str, Any]
@@ -154,9 +152,7 @@ class OptionUpdateAction(UpdateAction):
         }
 
     def _fetch_votes(self, vote_ids: list[int]) -> dict[int, dict[str, Any]]:
-        get_many_request = GetManyRequest("vote", vote_ids, ["value"])
-        gm_result = self.datastore.get_many([get_many_request])
-        votes = gm_result.get("vote", {})
+        votes = self.sql.get_many("vote", vote_ids, ["value"]) if vote_ids else {}
         return votes
 
     def _get_vote_id(

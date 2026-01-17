@@ -2,7 +2,6 @@ from typing import Any
 
 from ....shared.exceptions import ActionException
 from ....shared.filters import And, FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ...action import Action
 
 
@@ -33,18 +32,17 @@ class SetNumberMixin(Action):
             return
         if existing_number:
             return
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["motions_number_type", "motions_number_min_digits"],
             lock_result=False,
-        )
+        ) or {}
         if meeting.get("motions_number_type") == "manually":
             return
-        state = self.datastore.get(
-            fqid_from_collection_and_id("motion_state", state_id),
-            ["set_number"],
-            lock_result=False,
-        )
+        state = self.sql.get(
+            "motion_state", state_id, ["set_number"], lock_result=False
+        ) or {}
         if not state.get("set_number"):
             return
 
@@ -74,22 +72,24 @@ class SetNumberMixin(Action):
     def _get_prefix(
         self, meeting_id: int, lead_motion_id: int | None, category_id: int | None
     ) -> str:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["motions_number_with_blank", "motions_amendments_prefix"],
-        )
+            lock_result=False,
+        ) or {}
         blank = " " if meeting.get("motions_number_with_blank") else ""
         if lead_motion_id:
-            lead_motion = self.datastore.get(
-                fqid_from_collection_and_id("motion", lead_motion_id), ["number"]
-            )
+            lead_motion = self.sql.get(
+                "motion", lead_motion_id, ["number"], lock_result=False
+            ) or {}
             prefix = f"{lead_motion.get('number', '')}{blank}{meeting.get('motions_amendments_prefix', '')}"
         elif not category_id:
             prefix = ""
         else:
-            category = self.datastore.get(
-                fqid_from_collection_and_id("motion_category", category_id), ["prefix"]
-            )
+            category = self.sql.get(
+                "motion_category", category_id, ["prefix"], lock_result=False
+            ) or {}
             if category.get("prefix"):
                 prefix = f"{category['prefix']}{blank}"
             else:
@@ -106,11 +106,12 @@ class SetNumberMixin(Action):
         if existing_number_value:
             return existing_number_value
 
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", meeting_id),
+        meeting = self.sql.get(
+            "meeting",
+            meeting_id,
             ["motions_number_type"],
             lock_result=False,
-        )
+        ) or {}
         if lead_motion_id:
             filter: And | FilterOperator = FilterOperator(
                 "lead_motion_id", "=", lead_motion_id
@@ -125,7 +126,7 @@ class SetNumberMixin(Action):
                 FilterOperator("meeting_id", "=", meeting_id),
                 FilterOperator("lead_motion_id", "=", None),
             )
-        max_result = self.datastore.max("motion", filter, "number_value")
+        max_result = self.sql.max("motion", filter, "number_value")
         max_result = 1 if max_result is None else max_result + 1
         return max_result
 
@@ -142,7 +143,7 @@ class SetNumberMixin(Action):
         )
         if own_id:
             filter = And(filter, FilterOperator("id", "!=", own_id))
-        exists = (number in other_forbidden_numbers) or self.datastore.exists(
+        exists = (number in other_forbidden_numbers) or self.sql.exists(
             collection="motion", filter_=filter
         )
         return not exists

@@ -43,15 +43,15 @@ class BaseMeetingSetMediafileAction(UpdateAction, GetMeetingIdFromIdMixin):
         """
         Checks is_directory and mimetype and sets logo, creates a meeting_mediafile if necessary.
         """
-        mediafile = self.datastore.get(
-            fqid_from_collection_and_id("mediafile", instance["mediafile_id"]),
+        mediafile = self.sql.get(
+            "mediafile", instance["mediafile_id"],
             [
                 "is_directory",
                 "mimetype",
                 "owner_id",
                 "published_to_meetings_in_organization_id",
             ],
-        )
+        ) or {}
         self.check_owner(mediafile, instance)
         mm_id_or_payload = get_meeting_mediafile_id_or_create_payload(
             self.datastore,

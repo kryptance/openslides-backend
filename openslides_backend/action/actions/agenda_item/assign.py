@@ -1,9 +1,7 @@
 from ....models.models import AgendaItem
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException
 from ....shared.filters import FilterOperator
-from ....shared.patterns import fqid_from_collection_and_id
 from ....shared.schema import id_list_schema
 from ...generics.update import UpdateAction
 from ...mixins.singular_action_mixin import SingularActionMixin
@@ -40,15 +38,12 @@ class AgendaItemAssign(UpdateAction, SingularActionMixin):
             if instance.get("ids"):
                 assign_item_ids.update(instance["ids"])
 
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "agenda_item",
-                    list(assign_item_ids),
-                    ["parent_id", "child_ids", "meeting_id", "weight", "level"],
-                )
-            ]
-        )
+        if assign_item_ids:
+            self.sql.get_many(
+                "agenda_item",
+                list(assign_item_ids),
+                ["parent_id", "child_ids", "meeting_id", "weight", "level"],
+            )
 
     def get_updated_instances(self, action_data: ActionData) -> ActionData:
         action_data = super().get_updated_instances(action_data)
@@ -64,27 +59,29 @@ class AgendaItemAssign(UpdateAction, SingularActionMixin):
         self, parent_id: int | None, ids: list[int], meeting_id: int
     ) -> ActionData:
         filter = FilterOperator("meeting_id", "=", meeting_id)
-        db_instances = self.datastore.filter(
-            collection=self.model.collection,
-            filter_=filter,
-            mapped_fields=["id"],
+        db_instances = self.sql.filter(
+            self.model.collection,
+            filter,
+            ["id"],
         )
 
         ancesters = []
         if parent_id:
             # Calculate the ancesters of parent
             ancesters.append(parent_id)
-            grandparent = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, parent_id),
+            grandparent = self.sql.get(
+                self.model.collection,
+                parent_id,
                 ["parent_id"],
-            )
+            ) or {}
             while grandparent.get("parent_id") is not None:
                 gp_parent_id = grandparent["parent_id"]
                 ancesters.append(gp_parent_id)
-                grandparent = self.datastore.get(
-                    fqid_from_collection_and_id(self.model.collection, gp_parent_id),
+                grandparent = self.sql.get(
+                    self.model.collection,
+                    gp_parent_id,
                     ["parent_id"],
-                )
+                ) or {}
         for num, id_ in enumerate(ids):
             if id_ in ancesters:
                 raise ActionException(
@@ -93,10 +90,11 @@ class AgendaItemAssign(UpdateAction, SingularActionMixin):
             if id_ not in db_instances:
                 raise ActionException(f"Id {id_} not in db_instances.")
             if parent_id:
-                parent = self.datastore.get(
-                    fqid_from_collection_and_id(self.model.collection, parent_id),
+                parent = self.sql.get(
+                    self.model.collection,
+                    parent_id,
                     ["weight", "level"],
-                )
+                ) or {}
                 new_weight = parent.get("weight", 0) + 1 + num
                 new_level = parent.get("level", 0) + 1
             else:

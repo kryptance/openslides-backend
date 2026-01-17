@@ -9,7 +9,6 @@ from openslides_backend.shared.filters import And, FilterOperator
 from ....models.models import Speaker
 from ....permissions.permissions import Permissions
 from ....shared.exceptions import ActionException
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -26,8 +25,8 @@ class SpeakerUnpause(SingularActionMixin, CountdownControl, UpdateAction):
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
         instance = super().update_instance(instance)
-        db_instance = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        db_instance = self.sql.get(
+            self.model.collection, instance["id"],
             [
                 "begin_time",
                 "end_time",
@@ -39,7 +38,7 @@ class SpeakerUnpause(SingularActionMixin, CountdownControl, UpdateAction):
                 "structure_level_list_of_speakers_id",
                 "point_of_order",
             ],
-        )
+        ) or {}
         if (
             db_instance.get("begin_time") is None
             or db_instance.get("end_time") is not None
@@ -48,7 +47,7 @@ class SpeakerUnpause(SingularActionMixin, CountdownControl, UpdateAction):
             raise ActionException("Speaker is not paused.")
 
         # find current speaker, if exists, and pause it
-        result = self.datastore.filter(
+        result = self.sql.filter(
             self.model.collection,
             And(
                 FilterOperator("meeting_id", "=", db_instance["meeting_id"]),
@@ -59,7 +58,7 @@ class SpeakerUnpause(SingularActionMixin, CountdownControl, UpdateAction):
                 FilterOperator("pause_time", "=", None),
                 FilterOperator("end_time", "=", None),
             ),
-            mapped_fields=["id"],
+            ["id"],
         )
         if result:
             self.execute_other_action(SpeakerPause, [{"id": next(iter(result.keys()))}])

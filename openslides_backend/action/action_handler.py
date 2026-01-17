@@ -7,6 +7,7 @@ import fastjsonschema
 from psycopg.errors import RaiseException
 
 from openslides_backend.services.database.extended_database import ExtendedDatabase
+from openslides_backend.services.database.sql_helper import SqlHelper
 from openslides_backend.services.postgresql.db_connection_handling import (
     get_new_os_conn,
 )
@@ -123,6 +124,7 @@ class ActionHandler(BaseHandler):
             try:
                 with get_new_os_conn() as conn:
                     self.datastore = ExtendedDatabase(conn, self.logging, self.env)
+                    self.sql = SqlHelper(conn, self.logging, self.env)
                     results: ActionsResponseResults = []
                     if atomic:
                         results = self.execute_write_requests(
@@ -208,7 +210,7 @@ class ActionHandler(BaseHandler):
         """
         write_requests: list[WriteRequest] = []
         action_response_results: ActionsResponseResults = []
-        relation_manager = RelationManager(self.datastore)
+        relation_manager = RelationManager(self.datastore, self.sql)
         action_name_list = []
         for i, element in enumerate(payload):
             with make_span(self.env, f"parse action: {element['action']}"):
@@ -261,11 +263,12 @@ class ActionHandler(BaseHandler):
         ):
             raise View400Exception(f"Action {action_name} does not exist.")
         if not relation_manager:
-            relation_manager = RelationManager(self.datastore)
+            relation_manager = RelationManager(self.datastore, self.sql)
 
         self.logger.info(f"Performing action {action_name}.")
         action = ActionClass(
-            self.services, self.datastore, relation_manager, self.logging, self.env
+            self.services, self.datastore, relation_manager, self.logging, self.env,
+            sql=self.sql,
         )
         action_data = deepcopy(action_payload_element["data"])
 

@@ -112,7 +112,7 @@ class ProjectorProject(WeightMixin, SingularActionMixin, UpdateAction):
             FilterOperator("stable", "=", instance.get("stable", False)),
             FilterOperator("type", "=", instance.get("type")),
         )
-        result = self.datastore.filter(
+        result = self.sql.filter(
             "projection",
             filter_,
             ["id", "current_projector_id", "stable", "meeting_id"],
@@ -159,7 +159,7 @@ class ProjectorProject(WeightMixin, SingularActionMixin, UpdateAction):
                 FilterOperator("current_projector_id", "=", projector_id),
                 FilterOperator("stable", "=", False),
             )
-            projections = self.datastore.filter("projection", filter_, ["id"])
+            projections = self.sql.filter("projection", filter_, ["id"])
             filter_ = And(
                 FilterOperator("meeting_id", "=", instance["meeting_id"]),
                 FilterOperator("history_projector_id", "=", projector_id),

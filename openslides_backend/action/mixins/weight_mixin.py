@@ -9,10 +9,13 @@ class WeightMixin(Action):
     ) -> int:
         """
         Returns the current maximum weight + 1.
+
+        Uses direct SQL access for better performance.
         """
         if not collection:
             collection = self.model.collection
         if isinstance(filter, int):
             filter = FilterOperator("meeting_id", "=", filter)
-        weight = self.datastore.max(collection, filter, "weight")
+        # Use sql.max() for direct database access
+        weight = self.sql.max(collection, filter, "weight")
         return (weight or 0) + 1

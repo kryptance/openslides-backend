@@ -7,7 +7,6 @@ from openslides_backend.shared.typing import HistoryInformation
 from ....models.models import Motion
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import MissingPermission
 from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.delete import DeleteAction
@@ -28,15 +27,15 @@ class MotionDelete(DeleteAction, PermissionHelperMixin):
     all_motion_ids: list[int]
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        motion = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["id"]),
+        motion = self.sql.get(
+            "motion", instance["id"],
             [
                 "state_id",
                 "submitter_ids",
                 "meeting_id",
             ],
             lock_result=False,
-        )
+        ) or {}
         if has_perm(
             self.datastore,
             self.user_id,
@@ -59,9 +58,9 @@ class MotionDelete(DeleteAction, PermissionHelperMixin):
         # remove amendments of other deleted motions as they will be cascaded
         instances = list(super().get_updated_instances(action_data))
         self.all_motion_ids = [item["id"] for item in instances]
-        motions = self.datastore.get_many(
-            [GetManyRequest("motion", self.all_motion_ids, ["lead_motion_id"])]
-        )["motion"]
+        motions = self.sql.get_many(
+            "motion", self.all_motion_ids, ["lead_motion_id"]
+        ) if self.all_motion_ids else {}
         instances = [
             instance
             for instance in instances

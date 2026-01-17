@@ -2,9 +2,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from openslides_backend.models.models import MeetingUser
-from openslides_backend.services.database.commands import GetManyRequest
 from openslides_backend.shared.exceptions import ActionException
-from openslides_backend.shared.patterns import fqid_from_collection_and_id
 from openslides_backend.shared.schema import required_id_schema, str_list_schema
 
 from ...mixins.import_mixins import ImportState
@@ -181,29 +179,27 @@ class ParticipantJsonUpload(BaseUserJsonUpload, ParticipantCommon):
 
     def setup_lookups(self, data: list[dict[str, Any]]) -> None:
         super().setup_lookups(data)
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", self.meeting_id),
+        meeting = self.sql.get(
+            "meeting", self.meeting_id,
             ["group_ids", "structure_level_ids"],
-        )
-        result = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "group",
-                    meeting.get("group_ids", []),
-                    [
-                        "name",
-                        "id",
-                        "default_group_for_meeting_id",
-                        "anonymous_group_for_meeting_id",
-                    ],
-                ),
-                GetManyRequest(
-                    "structure_level",
-                    meeting.get("structure_level_ids", []),
-                    ["name", "id"],
-                ),
-            ]
-        )
+        ) or {}
+        group_ids = meeting.get("group_ids", [])
+        structure_level_ids = meeting.get("structure_level_ids", [])
+        result = {
+            "group": self.sql.get_many(
+                "group", group_ids,
+                [
+                    "name",
+                    "id",
+                    "default_group_for_meeting_id",
+                    "anonymous_group_for_meeting_id",
+                ],
+            ) if group_ids else {},
+            "structure_level": self.sql.get_many(
+                "structure_level", structure_level_ids,
+                ["name", "id"],
+            ) if structure_level_ids else {},
+        }
         result["group"] = {
             id_: group
             for id_, group in result["group"].items()

@@ -3,7 +3,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ....models.models import Motion
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.create_action_with_dependencies import CreateActionWithDependencies
 from ..agenda_item.agenda_creation import CreateActionWithAgendaItemMixin
 from ..agenda_item.create import AgendaItemCreate
@@ -37,10 +36,10 @@ class MotionCreateBase(
                 workflow_id = meeting.get("motions_default_amendment_workflow_id")
             else:
                 workflow_id = meeting.get("motions_default_workflow_id")
-        workflow = self.datastore.get(
-            fqid_from_collection_and_id("motion_workflow", workflow_id),
+        workflow = self.sql.get(
+            "motion_workflow", workflow_id,
             ["first_state_id"],
-        )
+        ) or {}
         instance["state_id"] = workflow.get("first_state_id")
 
     def create_submitters(self, instance: dict[str, Any]) -> None:

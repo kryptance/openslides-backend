@@ -7,7 +7,6 @@ from openslides_backend.shared.mixins.user_create_update_permissions_mixin impor
 )
 
 from ....models.models import User
-from ....shared.patterns import fqid_from_collection_and_id
 from ...mixins.import_mixins import (
     BaseJsonUploadAction,
     ImportState,
@@ -238,9 +237,9 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             if (
                 id_ := entry.get("username", {}).get("id", 0)
             ) and self.row_state != ImportState.ERROR:
-                oldnum = self.datastore.get(
-                    fqid_from_collection_and_id("user", id_), ["member_number"]
-                ).get("member_number")
+                oldnum = (self.sql.get(
+                    "user", id_, ["member_number"]
+                ) or {}).get("member_number")
                 has_member_number_error = False
 
                 if oldnum and member_number != oldnum:
@@ -666,7 +665,7 @@ class BaseUserJsonUpload(UsernameMixin, BaseJsonUploadAction):
             field="member_number",
             mapped_fields=["username", "member_number", "saml_id"],
         )
-        self.gender_dict = self.datastore.get_all(
+        self.gender_dict = self.sql.get_all(
             "gender", ["id", "name"], lock_result=False
         )
 

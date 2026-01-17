@@ -6,7 +6,6 @@ from openslides_backend.action.util.typing import ActionData
 
 from ....models.models import Speaker
 from ....permissions.permissions import Permissions
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.delete import DeleteAction
 from ...mixins.delegation_based_restriction_mixin import DelegationBasedRestrictionMixin
 from ...util.default_schema import DefaultSchema
@@ -23,16 +22,18 @@ class SpeakerDeleteAction(
     permission = Permissions.ListOfSpeakers.CAN_MANAGE
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        speaker = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        speaker = self.sql.get(
+            self.model.collection,
+            instance["id"],
             ["meeting_user_id"],
             lock_result=False,
-        )
+        ) or {}
         if speaker.get("meeting_user_id"):
-            meeting_user = self.datastore.get(
-                fqid_from_collection_and_id("meeting_user", speaker["meeting_user_id"]),
+            meeting_user = self.sql.get(
+                "meeting_user",
+                speaker["meeting_user_id"],
                 ["user_id"],
-            )
+            ) or {}
 
             restricted = self.check_delegator_restriction(
                 "users_forbid_delegator_in_list_of_speakers",
@@ -47,8 +48,9 @@ class SpeakerDeleteAction(
         return super().get_updated_instances(action_data)
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        speaker = self.datastore.get(
-            fqid_from_collection_and_id("speaker", instance["id"]),
+        speaker = self.sql.get(
+            "speaker",
+            instance["id"],
             [
                 "meeting_id",
                 "begin_time",
@@ -59,7 +61,7 @@ class SpeakerDeleteAction(
                 "unpause_time",
                 "structure_level_list_of_speakers_id",
             ],
-        )
+        ) or {}
         if (
             speaker.get("begin_time")
             and not speaker.get("end_time")

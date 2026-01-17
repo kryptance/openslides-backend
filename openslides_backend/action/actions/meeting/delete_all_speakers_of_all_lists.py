@@ -1,6 +1,5 @@
 from ....models.models import Meeting, Speaker
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ...generics.delete import DeleteAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -25,18 +24,16 @@ class DeleteAllSpeakersOfAllListsAction(DeleteAction, GetMeetingIdFromIdMixin):
     def get_updated_instances(self, action_data: ActionData) -> ActionData:
         new_action_data = []
         meeting_ids = [instance["id"] for instance in action_data]
-        get_many_request = GetManyRequest(
+        meetings = self.sql.get_many(
             "meeting", meeting_ids, ["list_of_speakers_ids"]
-        )
-        gm_result = self.datastore.get_many([get_many_request])
-        meetings = gm_result.get("meeting", {})
+        ) if meeting_ids else {}
 
         los_ids = []
         for meeting in meetings.values():
             los_ids.extend(meeting.get("list_of_speakers_ids", []))
-        get_many_request = GetManyRequest("list_of_speakers", los_ids, ["speaker_ids"])
-        gm_result = self.datastore.get_many([get_many_request])
-        lists_of_speakers = gm_result.get("list_of_speakers", {})
+        lists_of_speakers = self.sql.get_many(
+            "list_of_speakers", los_ids, ["speaker_ids"]
+        ) if los_ids else {}
         for los in lists_of_speakers.values():
             for speaker in los.get("speaker_ids", []):
                 new_action_data.append({"id": speaker})

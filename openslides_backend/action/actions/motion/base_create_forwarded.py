@@ -12,12 +12,10 @@ from ....i18n.translator import Translator
 from ....i18n.translator import translate as _
 from ....permissions.permission_helper import has_perm
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, PermissionDenied
 from ....shared.filters import FilterOperator
 from ....shared.interfaces.write_request import WriteRequest
 from ....shared.patterns import fqid_from_collection_and_id
-from ....shared.util import ONE_ORGANIZATION_FQID
 from ...mixins.forward_mediafiles_mixin import ForwardMediafilesMixin
 from ...util.typing import ActionData, ActionResultElement, ActionResults
 from ..motion_change_recommendation.create import MotionChangeRecommendationCreateAction
@@ -32,104 +30,93 @@ class BaseMotionCreateForwarded(
     """
 
     def prefetch(self, action_data: ActionData) -> None:
-        self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "meeting",
-                    list(
-                        {
-                            meeting_id
-                            for instance in action_data
-                            if (meeting_id := instance.get("meeting_id"))
-                        }
-                    ),
-                    [
-                        "id",
-                        "is_active_in_organization_id",
-                        "name",
-                        "motions_default_workflow_id",
-                        "motions_default_amendment_workflow_id",
-                        "committee_id",
-                        "default_group_id",
-                        "motion_submitter_ids",
-                        "motions_number_type",
-                        "motions_number_min_digits",
-                        "agenda_item_creation",
-                        "list_of_speakers_initially_closed",
-                        "list_of_speakers_ids",
-                        "motion_ids",
-                    ],
-                ),
-                GetManyRequest(
-                    "motion",
-                    list(
-                        {
-                            origin_id
-                            for instance in action_data
-                            if (origin_id := instance.get("origin_id"))
-                        }
-                    ),
-                    [
-                        "meeting_id",
-                        "lead_motion_id",
-                        "state_id",
-                        "all_origin_ids",
-                        "derived_motion_ids",
-                        "all_derived_motion_ids",
-                        "amendment_ids",
-                        "attachment_meeting_mediafile_ids",
-                    ],
-                ),
-            ],
-            lock_result=False,
+        meeting_ids = list(
+            {
+                meeting_id
+                for instance in action_data
+                if (meeting_id := instance.get("meeting_id"))
+            }
         )
+        origin_ids = list(
+            {
+                origin_id
+                for instance in action_data
+                if (origin_id := instance.get("origin_id"))
+            }
+        )
+        if meeting_ids:
+            self.sql.get_many(
+                "meeting", meeting_ids,
+                [
+                    "id",
+                    "is_active_in_organization_id",
+                    "name",
+                    "motions_default_workflow_id",
+                    "motions_default_amendment_workflow_id",
+                    "committee_id",
+                    "default_group_id",
+                    "motion_submitter_ids",
+                    "motions_number_type",
+                    "motions_number_min_digits",
+                    "agenda_item_creation",
+                    "list_of_speakers_initially_closed",
+                    "list_of_speakers_ids",
+                    "motion_ids",
+                ],
+                lock_result=False,
+            )
+        if origin_ids:
+            self.sql.get_many(
+                "motion", origin_ids,
+                [
+                    "meeting_id",
+                    "lead_motion_id",
+                    "state_id",
+                    "all_origin_ids",
+                    "derived_motion_ids",
+                    "all_derived_motion_ids",
+                    "amendment_ids",
+                    "attachment_meeting_mediafile_ids",
+                ],
+                lock_result=False,
+            )
 
     def get_user_verbose_names(
         self, meeting_user_ids: list[int | None], language: str | None
     ) -> str | None:
         Translator.set_translation_language(language or self.default_language)
         deleted_string = _("Deleted user")
-        meeting_users = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "meeting_user",
-                    [id_ for id_ in meeting_user_ids if id_],
-                    ["user_id", "structure_level_ids"],
-                )
-            ],
+        meeting_users = self.sql.get_many(
+            "meeting_user",
+            [id_ for id_ in meeting_user_ids if id_],
+            ["user_id", "structure_level_ids"],
             lock_result=False,
-        )["meeting_user"]
+        )
         user_ids = [
             user_id
             for meeting_user in meeting_users.values()
             if (user_id := meeting_user.get("user_id"))
         ]
-        if not len(user_ids):
-            requests = []
-        else:
-            requests = [
-                GetManyRequest(
-                    "user",
-                    user_ids,
-                    ["id", "first_name", "last_name", "title", "pronoun"],
-                )
-            ]
-        if structure_level_ids := list(
+        users: dict[int, dict[str, Any]] = {}
+        structure_levels: dict[int, dict[str, Any]] = {}
+        if user_ids:
+            users = self.sql.get_many(
+                "user",
+                user_ids,
+                ["id", "first_name", "last_name", "title", "pronoun"],
+                lock_result=False,
+            )
+        structure_level_ids = list(
             {
                 structure_level_id
                 for meeting_user in meeting_users.values()
                 for structure_level_id in meeting_user.get("structure_level_ids", [])
             }
-        ):
-            requests.append(
-                GetManyRequest("structure_level", structure_level_ids, ["name"])
+        )
+        if structure_level_ids:
+            structure_levels = self.sql.get_many(
+                "structure_level", structure_level_ids, ["name"], lock_result=False
             )
-        if requests:
-            user_data = self.datastore.get_many(requests, lock_result=False)
-        else:
-            user_data = {}
-        users = user_data.get("user", {})
-        structure_levels = user_data.get("structure_level", {})
         names = []
         for meeting_user_id in meeting_user_ids:
             if meeting_user_id:
@@ -173,9 +160,8 @@ class BaseMotionCreateForwarded(
         is_sub_call: bool = False,
     ) -> tuple[WriteRequest | None, ActionResults | None]:
         self.id_to_result_extra_data: dict[int, dict[str, Any]] = {}
-        self.default_language = self.datastore.get(
-            ONE_ORGANIZATION_FQID, ["default_language"], raise_exception=False
-        ).get("default_language", "en")
+        organization = self.sql.get("organization", 1, ["default_language"]) or {}
+        self.default_language = organization.get("default_language", "en")
         return super().perform(action_data, user_id, internal, is_sub_call)
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
@@ -183,22 +169,23 @@ class BaseMotionCreateForwarded(
         self.mark_amendments = instance.pop(
             "mark_amendments_as_forwarded", False
         ) or instance.get("marked_forwarded", False)
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             [
                 "motions_default_workflow_id",
                 "motions_default_amendment_workflow_id",
                 "language",
             ],
             lock_result=False,
-        )
+        ) or {}
         self.set_state_from_workflow(instance, meeting)
         committee = self.check_for_origin_id(instance)
         use_original_number = instance.get("use_original_number", False)
 
         if use_original_submitter := instance.pop("use_original_submitter", False):
             submitters = list(
-                self.datastore.filter(
+                self.sql.filter(
                     "motion_submitter",
                     FilterOperator("motion_id", "=", instance["origin_id"]),
                     ["meeting_user_id", "weight"],
@@ -213,11 +200,13 @@ class BaseMotionCreateForwarded(
                 instance["additional_submitter"] = self.get_user_verbose_names(
                     meeting_user_ids, meeting.get("language")
                 )
-            text_submitter = self.datastore.get(
-                fqid_from_collection_and_id("motion", instance["origin_id"]),
+            origin_motion = self.sql.get(
+                "motion",
+                instance["origin_id"],
                 ["additional_submitter"],
                 lock_result=False,
-            ).get("additional_submitter")
+            ) or {}
+            text_submitter = origin_motion.get("additional_submitter")
             if text_submitter:
                 if instance.get("additional_submitter"):
                     instance["additional_submitter"] += ", " + text_submitter
@@ -232,11 +221,8 @@ class BaseMotionCreateForwarded(
         self.set_text_hash(instance)
         instance["forwarded"] = datetime.now(ZoneInfo("UTC"))
         with_change_recommendations = instance.pop("with_change_recommendations", False)
-        self.datastore.apply_changed_model(
-            fqid_from_collection_and_id("motion", instance["id"]), instance
-        )
         if with_change_recommendations:
-            change_recos = self.datastore.filter(
+            change_recos = self.sql.filter(
                 "motion_change_recommendation",
                 FilterOperator("motion_id", "=", instance["origin_id"]),
                 [
@@ -249,35 +235,34 @@ class BaseMotionCreateForwarded(
                     "text",
                 ],
             )
+            # Pass meeting_id directly since motion isn't in DB yet
             change_reco_data = [
-                {**change_reco, "motion_id": instance["id"]}
+                {**change_reco, "motion_id": instance["id"], "meeting_id": instance["meeting_id"]}
                 for change_reco in change_recos.values()
             ]
             self.execute_other_action(
                 MotionChangeRecommendationCreateAction, change_reco_data
             )
-        amendment_ids = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["origin_id"]),
+        origin_motion = self.sql.get(
+            "motion",
+            instance["origin_id"],
             ["amendment_ids"],
             lock_result=False,
-        ).get("amendment_ids", [])
+        ) or {}
+        amendment_ids = origin_motion.get("amendment_ids", [])
         if self.should_forward_amendments(instance):
-            new_amendments = self.datastore.get_many(
+            new_amendments = self.sql.get_many(
+                "motion",
+                amendment_ids,
                 [
-                    GetManyRequest(
-                        "motion",
-                        amendment_ids,
-                        [
-                            "title",
-                            "text",
-                            "amendment_paragraphs",
-                            "reason",
-                            "id",
-                            "state_id",
-                        ],
-                    )
-                ]
-            )["motion"]
+                    "title",
+                    "text",
+                    "amendment_paragraphs",
+                    "reason",
+                    "id",
+                    "state_id",
+                ],
+            )
             total = len(new_amendments)
             state_ids = {
                 state_id
@@ -285,16 +270,12 @@ class BaseMotionCreateForwarded(
                 if (state_id := amendment.get("state_id"))
             }
             if len(state_ids):
-                states = self.datastore.get_many(
-                    [
-                        GetManyRequest(
-                            "motion_state",
-                            list(state_ids),
-                            ["allow_amendment_forwarding"],
-                        )
-                    ],
+                states = self.sql.get_many(
+                    "motion_state",
+                    list(state_ids),
+                    ["allow_amendment_forwarding"],
                     lock_result=False,
-                )["motion_state"]
+                )
             else:
                 states = {}
             states = {
@@ -353,11 +334,12 @@ class BaseMotionCreateForwarded(
         return result
 
     def handle_number(self, instance: dict[str, Any]) -> dict[str, Any]:
-        origin = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["origin_id"]),
+        origin = self.sql.get(
+            "motion",
+            instance["origin_id"],
             ["number"],
             lock_result=False,
-        )
+        ) or {}
         if instance.pop("use_original_number", None) and (num := origin.get("number")):
             number = self.get_clean_number(num, instance["meeting_id"])
             self.set_created_last_modified(instance)
@@ -375,30 +357,32 @@ class BaseMotionCreateForwarded(
         return new_number
 
     def check_for_origin_id(self, instance: dict[str, Any]) -> dict[str, Any]:
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            instance["meeting_id"],
             ["committee_id"],
             lock_result=False,
-        )
-        forwarded_from = self.datastore.get(
-            fqid_from_collection_and_id("motion", instance["origin_id"]),
+        ) or {}
+        forwarded_from = self.sql.get(
+            "motion",
+            instance["origin_id"],
             ["meeting_id"],
             lock_result=False,
-        )
-        forwarded_from_meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", forwarded_from["meeting_id"]),
+        ) or {}
+        forwarded_from_meeting = self.sql.get(
+            "meeting",
+            forwarded_from["meeting_id"],
             ["committee_id"],
             lock_result=False,
-        )
+        ) or {}
         # use the forwarding user id and id later in the handle forwarding user
         # code.
-        committee = self.datastore.get(
-            fqid_from_collection_and_id(
-                "committee", forwarded_from_meeting["committee_id"]
-            ),
+        committee = self.sql.get(
+            "committee",
+            forwarded_from_meeting["committee_id"],
             ["id", "name", "forward_to_committee_ids"],
             lock_result=False,
-        )
+        ) or {}
         if meeting["committee_id"] not in committee.get("forward_to_committee_ids", []):
             raise ActionException(
                 f"Committee id {meeting['committee_id']} not in {committee.get('forward_to_committee_ids', [])}"
@@ -409,11 +393,12 @@ class BaseMotionCreateForwarded(
         raise ActionException("Not implemented")
 
     def check_permissions(self, instance: dict[str, Any]) -> None:
-        origin = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["origin_id"]),
+        origin = self.sql.get(
+            self.model.collection,
+            instance["origin_id"],
             ["meeting_id"],
             lock_result=False,
-        )
+        ) or {}
         perm_origin = Permissions.Motion.CAN_FORWARD
         if not has_perm(
             self.datastore, self.user_id, perm_origin, origin["meeting_id"]
@@ -424,11 +409,12 @@ class BaseMotionCreateForwarded(
 
     def set_origin_ids(self, instance: dict[str, Any]) -> None:
         if instance.get("origin_id"):
-            origin = self.datastore.get(
-                fqid_from_collection_and_id("motion", instance["origin_id"]),
+            origin = self.sql.get(
+                "motion",
+                instance["origin_id"],
                 ["all_origin_ids", "meeting_id"],
                 lock_result=False,
-            )
+            ) or {}
             instance["origin_meeting_id"] = origin["meeting_id"]
             instance["all_origin_ids"] = origin.get("all_origin_ids", [])
             instance["all_origin_ids"].append(instance["origin_id"])
@@ -481,14 +467,9 @@ class BaseMotionCreateForwarded(
         self, origin_ids: list[int]
     ) -> dict[int, dict[str, Any]]:
         """Helper method for duplicate_mediafiles."""
-        return self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "motion", origin_ids, ["attachment_meeting_mediafile_ids"]
-                )
-            ],
-            lock_result=False,
-        )["motion"]
+        return self.sql.get_many(
+            "motion", origin_ids, ["attachment_meeting_mediafile_ids"], lock_result=False
+        )
 
     def _prepare_mediafiles_data(
         self,
@@ -562,21 +543,17 @@ class BaseMotionCreateForwarded(
         all_mm_ids = [
             mm_id for ids in target_meeting_id_mm_ids_map.values() for mm_id in ids
         ]
-        meeting_mediafiles = self.datastore.get_many(
+        meeting_mediafiles = self.sql.get_many(
+            "meeting_mediafile",
+            all_mm_ids,
             [
-                GetManyRequest(
-                    "meeting_mediafile",
-                    all_mm_ids,
-                    [
-                        "mediafile_id",
-                        "is_public",
-                        "access_group_ids",
-                        "inherited_access_group_ids",
-                    ],
-                )
+                "mediafile_id",
+                "is_public",
+                "access_group_ids",
+                "inherited_access_group_ids",
             ],
             lock_result=False,
-        )["meeting_mediafile"]
+        )
 
         for meeting_id, mediafile_ids in target_meeting_id_mm_ids_map.items():
             for mediafile_id in mediafile_ids:
@@ -588,16 +565,12 @@ class BaseMotionCreateForwarded(
 
     def _fetch_mediafiles(self, mediafile_ids: list[int]) -> dict[int, dict[str, Any]]:
         """Helper method for _prepare_mediafiles_data"""
-        return self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "mediafile",
-                    mediafile_ids,
-                    ["id", "owner_id", "parent_id", "meeting_mediafile_ids"],
-                )
-            ],
+        return self.sql.get_many(
+            "mediafile",
+            mediafile_ids,
+            ["id", "owner_id", "parent_id", "meeting_mediafile_ids"],
             lock_result=False,
-        )["mediafile"]
+        )
 
     def forward_mediafiles(
         self,
@@ -605,11 +578,13 @@ class BaseMotionCreateForwarded(
         meeting_mediafile_replace_map: dict[int, dict[int, int]],
     ) -> dict[str, Any]:
         if replace_map := meeting_mediafile_replace_map.get(instance["meeting_id"], {}):
-            attachment_ids = self.datastore.get(
-                fqid_from_collection_and_id("motion", instance["origin_id"]),
+            origin_motion = self.sql.get(
+                "motion",
+                instance["origin_id"],
                 ["attachment_meeting_mediafile_ids"],
                 lock_result=False,
-            ).get("attachment_meeting_mediafile_ids", [])
+            ) or {}
+            attachment_ids = origin_motion.get("attachment_meeting_mediafile_ids", [])
 
             instance["attachment_meeting_mediafile_ids"] = [
                 mapped_id
@@ -637,8 +612,8 @@ class BaseMotionCreateForwarded(
         }
 
     def check_can_forward_with_attachments(self) -> None:
-        organization = self.datastore.get(
-            ONE_ORGANIZATION_FQID, ["disable_forward_with_attachments"]
-        )
+        organization = self.sql.get(
+            "organization", 1, ["disable_forward_with_attachments"]
+        ) or {}
         if organization.get("disable_forward_with_attachments"):
             raise ActionException("Forward with attachments is disabled")

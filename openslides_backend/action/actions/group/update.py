@@ -9,8 +9,6 @@ from ....permissions.permission_helper import (
     is_admin,
 )
 from ....permissions.permissions import Permissions
-from ....services.database.commands import GetManyRequest
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -30,10 +28,10 @@ class GroupUpdateAction(GroupMixin, UpdateAction):
     permission = Permissions.User.CAN_MANAGE
 
     def update_instance(self, instance: dict[str, Any]) -> dict[str, Any]:
-        group = self.datastore.get(
-            fqid_from_collection_and_id("group", instance["id"]),
+        group = self.sql.get(
+            "group", instance["id"],
             ["anonymous_group_for_meeting_id", "meeting_user_ids"],
-        )
+        ) or {}
         if "permissions" in instance:
             instance["permissions"] = filter_surplus_permissions(
                 instance["permissions"]
@@ -62,9 +60,9 @@ class GroupUpdateAction(GroupMixin, UpdateAction):
         if meeting_user_ids and {Permissions.User.CAN_MANAGE}.intersection(
             instance.get("permissions", [])
         ):
-            meeting_users = self.datastore.get_many(
-                [GetManyRequest("meeting_user", meeting_user_ids, ["locked_out"])]
-            )["meeting_user"]
+            meeting_users = self.sql.get_many(
+                "meeting_user", meeting_user_ids, ["locked_out"]
+            ) if meeting_user_ids else {}
             if any(
                 meeting_user.get("locked_out", False)
                 for meeting_user in meeting_users.values()

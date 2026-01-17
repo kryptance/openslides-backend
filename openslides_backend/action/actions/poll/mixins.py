@@ -6,9 +6,8 @@ from psycopg.types.json import Jsonb
 
 from openslides_backend.shared.typing import HistoryInformation
 
-from ....services.database.commands import GetManyRequest
 from ....shared.exceptions import ActionException, VoteServiceException
-from ....shared.patterns import collection_from_fqid, fqid_from_collection_and_id
+from ....shared.patterns import collection_from_fqid
 from ...action import Action
 from ..option.set_auto_fields import OptionSetAutoFields
 from ..projector_countdown.mixins import CountdownCommand, CountdownControl
@@ -22,10 +21,11 @@ class PollValidationMixin(Action):
         super().validate_instance(instance)
 
         if poll_id := instance.get("id"):
-            poll = self.datastore.get(
-                fqid_from_collection_and_id("poll", poll_id),
+            poll = self.sql.get(
+                "poll",
+                poll_id,
                 ["max_votes_amount", "min_votes_amount", "max_votes_per_option"],
-            )
+            ) or {}
         max_votes_amount = cast(
             int,
             instance.get(
@@ -61,11 +61,12 @@ class PollPermissionMixin(Action):
             content_object_id = instance.get("content_object_id", "")
             meeting_id = instance["meeting_id"]
         else:
-            poll = self.datastore.get(
-                fqid_from_collection_and_id("poll", instance["id"]),
+            poll = self.sql.get(
+                "poll",
+                instance["id"],
                 ["content_object_id", "meeting_id"],
                 lock_result=False,
-            )
+            ) or {}
             content_object_id = poll.get("content_object_id", "")
             meeting_id = poll["meeting_id"]
         if not content_object_id:
@@ -77,8 +78,9 @@ class PollPermissionMixin(Action):
 
 class StopControl(CountdownControl, Action):
     def on_stop(self, instance: dict[str, Any]) -> None:
-        poll = self.datastore.get(
-            fqid_from_collection_and_id(self.model.collection, instance["id"]),
+        poll = self.sql.get(
+            self.model.collection,
+            instance["id"],
             [
                 "state",
                 "meeting_id",
@@ -86,17 +88,18 @@ class StopControl(CountdownControl, Action):
                 "global_option_id",
                 "entitled_group_ids",
             ],
-        )
+        ) or {}
         # reset countdown given by meeting
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", poll["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting",
+            poll["meeting_id"],
             [
                 "poll_couple_countdown",
                 "poll_countdown_id",
                 "users_enable_vote_weight",
                 "users_enable_vote_delegations",
             ],
-        )
+        ) or {}
         if meeting.get("poll_couple_countdown") and meeting.get("poll_countdown_id"):
             self.control_countdown(meeting["poll_countdown_id"], CountdownCommand.RESET)
 
@@ -187,38 +190,34 @@ class StopControl(CountdownControl, Action):
         all_voted_users = set(poll.get("voted_ids", []))
 
         # get all users from the groups.
-        gmr = GetManyRequest(
+        groups = self.sql.get_many(
             "group", poll.get("entitled_group_ids", []), ["meeting_user_ids"]
-        )
-        gm_result = self.datastore.get_many([gmr])
-        groups = gm_result.get("group", {}).values()
+        ).values()
 
         # fetch presence status
         meeting_user_ids = set()
         for group in groups:
             meeting_user_ids.update(group.get("meeting_user_ids", []))
-        gmr = GetManyRequest(
+        meeting_users = self.sql.get_many(
             "meeting_user", list(meeting_user_ids), ["user_id", "vote_delegated_to_id"]
-        )
-        gm_result = self.datastore.get_many([gmr])
-        meeting_users = gm_result.get("meeting_user", {}).values()
+        ).values()
 
-        mu_to_user_id = {}
+        mu_to_user_id: dict[int, dict[str, Any]] = {}
         if meeting.get("users_enable_vote_delegations"):
             # fetch vote delegations
             delegated_to_mu_ids = list(
                 {id_ for mu in meeting_users if (id_ := mu.get("vote_delegated_to_id"))}
             )
             if delegated_to_mu_ids:
-                gmr = GetManyRequest("meeting_user", delegated_to_mu_ids, ["user_id"])
-                mu_to_user_id = self.datastore.get_many([gmr]).get("meeting_user", {})
+                mu_to_user_id = self.sql.get_many(
+                    "meeting_user", delegated_to_mu_ids, ["user_id"]
+                )
 
-        gmr = GetManyRequest(
+        users = self.sql.get_many(
             "user",
             [mu["user_id"] for mu in meeting_users],
             ["is_present_in_meeting_ids"],
         )
-        users = self.datastore.get_many([gmr]).get("user", {})
 
         for mu in meeting_users:
             entitled_users.append(

@@ -1,6 +1,5 @@
 from ....models.models import ChatGroup
 from ....permissions.permissions import Permissions
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...util.default_schema import DefaultSchema
 from ...util.register import register_action
@@ -22,10 +21,10 @@ class ChatGroupClear(ChatEnabledMixin, UpdateAction):
     def get_updated_instances(self, action_data: ActionData) -> ActionData:
         delete_action_data = []
         for instance in action_data:
-            chat_group = self.datastore.get(
-                fqid_from_collection_and_id(self.model.collection, instance["id"]),
+            chat_group = self.sql.get(
+                self.model.collection, instance["id"],
                 ["chat_message_ids"],
-            )
+            ) or {}
             for id_ in chat_group.get("chat_message_ids", []):
                 delete_action_data.append({"id": id_})
         self.execute_other_action(ChatMessageDelete, delete_action_data)

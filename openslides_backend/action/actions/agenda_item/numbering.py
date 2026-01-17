@@ -1,8 +1,5 @@
-from openslides_backend.services.database.commands import GetManyRequest
-
 from ....models.models import AgendaItem
 from ....permissions.permissions import Permissions
-from ....shared.patterns import fqid_from_collection_and_id
 from ...generics.update import UpdateAction
 from ...mixins.singular_action_mixin import SingularActionMixin
 from ...util.default_schema import DefaultSchema
@@ -28,19 +25,16 @@ class AgendaItemNumbering(SingularActionMixin, UpdateAction):
         instance = next(iter(action_data))
 
         # Fetch data
-        meeting = self.datastore.get(
-            fqid_from_collection_and_id("meeting", instance["meeting_id"]),
+        meeting = self.sql.get(
+            "meeting", instance["meeting_id"],
             ["agenda_item_ids", "agenda_numeral_system", "agenda_number_prefix"],
-        )
-        agenda_items = self.datastore.get_many(
-            [
-                GetManyRequest(
-                    "agenda_item",
-                    meeting.get("agenda_item_ids", []),
-                    ["id", "item_number", "parent_id", "weight", "type"],
-                )
-            ]
-        ).get("agenda_item", {})
+        ) or {}
+        agenda_item_ids = meeting.get("agenda_item_ids", [])
+        agenda_items = self.sql.get_many(
+            "agenda_item",
+            agenda_item_ids,
+            ["id", "item_number", "parent_id", "weight", "type"],
+        ) if agenda_item_ids else {}
         numeral_system = meeting.get("agenda_numeral_system", "arabic")
         agenda_number_prefix = meeting.get("agenda_number_prefix")
         # Build agenda tree and get new numbers
