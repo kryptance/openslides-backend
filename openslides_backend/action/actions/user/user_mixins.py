@@ -282,7 +282,8 @@ def check_gender_exists(datastore: Database, instance: dict[str, Any]) -> None:
     """raises ActionException if the gender is non existant"""
     if gender_id := instance.get("gender_id"):
         if not datastore.get(
-            fqid_from_collection_and_id("gender", gender_id),
+            "gender",
+            gender_id,
             ["id", "name"],
             lock_result=False,
         ):

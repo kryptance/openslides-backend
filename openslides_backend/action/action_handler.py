@@ -27,6 +27,7 @@ from ..shared.interfaces.services import Services
 from ..shared.otel import make_span
 from ..shared.schema import schema_version
 from . import actions  # noqa
+from .generics.delete import DeleteAction
 from .relations.relation_manager import RelationManager
 from .util.action_type import ActionType
 from .util.actions_map import actions_map
@@ -125,6 +126,8 @@ class ActionHandler(BaseHandler):
             try:
                 with get_new_os_conn() as conn:
                     self.sql = SqlHelper(conn, self.logging, self.env)
+                    # Reset delete tracking at the start of each request
+                    DeleteAction.reset_delete_tracking()
                     results: ActionsResponseResults = []
                     if atomic:
                         results = self.execute_actions(self.parse_actions, payload)
@@ -132,7 +135,7 @@ class ActionHandler(BaseHandler):
                         for element in payload:
                             try:
                                 result = self.execute_actions(
-                                    lambda e: self.perform_action(e)[1],
+                                    lambda e: self.perform_action(e),
                                     element,
                                 )
                                 results.append(result)

@@ -1276,7 +1276,7 @@ class UserCreateActionTest(BaseActionTestCase):
             },
         )
         self.assert_status_code(response, 400)
-        assert "Model 'gender/5' does not exist." in response.json["message"]
+        assert "GenderId '5' is not in the allowed gender list." in response.json["message"]
 
     def test_exceed_limit_of_users(self) -> None:
         self.set_models(

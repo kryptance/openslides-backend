@@ -1,5 +1,6 @@
 from typing import Any
 
+from ...shared.exceptions import ActionException
 from ...shared.patterns import fqid_from_collection_and_id
 from ..action import Action
 
@@ -16,6 +17,11 @@ class UpdateAction(Action):
         # Primary instance manipulation for defaults and extra fields.
         instance = self.update_instance(instance)
         self.apply_instance(instance)
+
+        # Validate that the model exists (after update_instance sets/validates id)
+        fqid = fqid_from_collection_and_id(self.model.collection, instance["id"])
+        if not self.sql.get(self.model.collection, instance["id"], ["id"]):
+            raise ActionException(f"Model '{fqid}' does not exist.")
 
         self.validate_relation_fields(instance)
 

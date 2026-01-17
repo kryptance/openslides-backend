@@ -64,6 +64,11 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
         # Scan the instances and collect the info for the history information
         # Copy instances first since they are modified
         for instance in deepcopy(self.instances):
+            # Check for meta_new flag (set by MeetingUserSetData when creating new meeting_user)
+            # This handles the case where the meeting_user was just created via execute_other_action
+            # and is already in the DB, but should be treated as "created" for history purposes
+            is_newly_created = instance.pop("meta_new", False)
+
             # Fetch the current instance from the db to diff with the given instance
             db_instance = self.sql.get(
                 self.model.collection,
@@ -71,7 +76,7 @@ class MeetingUserHistoryMixin(ExtendHistoryMixin, Action):
                 list(instance.keys()) + ["user_id", "meeting_id"],
                 lock_result=False,
             ) or {}
-            if not db_instance:
+            if not db_instance or is_newly_created:
                 self.add_created_meeting_user_history_information(instance, information)
             else:
                 self.add_updated_meeting_user_history_information(

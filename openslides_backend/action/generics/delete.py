@@ -51,7 +51,10 @@ class DeleteAction(Action):
             self.model.collection,
             instance["id"],
             relevant_fields,
-        ) or {}
+        )
+        # Validate that the model exists
+        if not db_instance:
+            raise ActionException(f"Model '{this_fqid}' does not exist.")
 
         # Update instance (by default this does nothing)
         instance = self.update_instance(instance)
