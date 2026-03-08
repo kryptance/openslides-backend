@@ -1,6 +1,7 @@
 import binascii
 from base64 import b64decode
 from pathlib import Path
+from typing import Any
 
 from ...action.action_handler import ActionHandler
 from ...action.action_worker import handle_action_in_worker_thread
@@ -10,14 +11,15 @@ from ...migrations.migration_manager import MigrationManager
 from ...services.auth.interface import AUTHENTICATION_HEADER, COOKIE_NAME
 from ...services.postgresql.db_connection_handling import get_new_os_conn
 from ...shared.env import DEV_PASSWORD
-from ...shared.exceptions import AuthenticationException, ServerError
+from ...shared.exceptions import AuthenticationException, ServerError, View400Exception
 from ...shared.interfaces.wsgi import RouteResponse
+from ...shared.oidc_validator import get_oidc_validator, is_session_invalidated
 from ..http_exceptions import Unauthorized
+from ..redirect_response import RedirectResponse
 from ..request import Request
-from .base_view import BaseView, route
+from .base_view import BaseView, invalidate_session, route
 
 INTERNAL_AUTHORIZATION_HEADER = "Authorization"
-
 
 VERSION_PATH = Path(__file__).parent / ".." / ".." / "version.txt"
 
@@ -93,6 +95,156 @@ class ActionView(BaseView):
         with open(VERSION_PATH) as file:
             version = file.read().strip()
             return {"version": version}, None
+
+    @route("oidc-provision", prefix="auth", method="GET", json=False)
+    def oidc_provision_route(self, request: Request) -> RouteResponse:
+        """
+        Handle OIDC redirect after Keycloak login.
+
+        This endpoint is called by Traefik after successful OIDC authentication.
+        It validates the Bearer token, provisions the user, sets auth cookie/token,
+        and redirects to the frontend.
+
+        Query parameters:
+        - redirect_uri: Original URL to redirect to (default: "/")
+
+        Response:
+        - HTTP 302 Redirect to redirect_uri
+        - Authorization header with access token
+        - openslides_session cookie
+        """
+        # 1. Extract Bearer token from Authorization header (set by Traefik)
+        auth_header = request.headers.get("Authorization", "") or request.headers.get(
+            "Authentication", ""
+        )
+        if not auth_header.lower().startswith("bearer "):
+            raise Unauthorized("Missing Bearer token")
+
+        token = auth_header[7:]
+
+        # 2. Validate token via OIDC validator
+        validator = get_oidc_validator()
+        if not validator:
+            raise Unauthorized("OIDC not configured")
+
+        payload = validator.validate_token(token)
+        keycloak_id = payload.get("sub")
+        if not keycloak_id:
+            raise Unauthorized("Missing 'sub' claim")
+
+        # 3. Check if session was invalidated
+        session_id = payload.get("sid")
+        if session_id and is_session_invalidated(session_id):
+            raise Unauthorized("Session invalidated")
+
+        # 4. Get user info from Keycloak userinfo endpoint
+        user_info = validator.get_user_info(token)
+
+        # 5. Provision/update user via user.save_keycloak_account action
+        handler = ActionHandler(self.env, self.services, self.logging)
+        action_data = {
+            "keycloak_id": keycloak_id,
+            "email": user_info.get("email"),
+            "given_name": user_info.get("given_name"),
+            "family_name": user_info.get("family_name"),
+            "preferred_username": user_info.get("preferred_username"),
+            "name": user_info.get("name"),
+        }
+        action_data = {k: v for k, v in action_data.items() if v is not None}
+
+        result = handler.handle_request(
+            [{"action": "user.save_keycloak_account", "data": [action_data]}],
+            user_id=-1,
+            internal=True,
+        )
+
+        if not result.get("success") or not result.get("results"):
+            raise Unauthorized("User provisioning failed")
+
+        user_id = result["results"][0][0].get("user_id")
+        if not user_id:
+            raise Unauthorized("User creation failed")
+
+        self.logger.debug(f"Provisioned OIDC user: {user_id}")
+
+        # 6. Generate auth token and cookie via SSO login
+        access_token, refresh_cookie = self.services.authentication().sso_login(user_id)
+
+        # 7. Redirect to frontend with auth session cookie
+        redirect_uri = request.args.get("redirect_uri", "/")
+        return RedirectResponse(
+            location=redirect_uri,
+            access_token=access_token,
+            refresh_cookie=refresh_cookie,
+        ), None
+
+    @route("who-am-i", prefix="auth", method="POST", json=False)
+    def oidc_who_am_i(self, request: Request) -> RouteResponse:
+        """
+        Handle who-am-i request - validates Bearer token and returns user info.
+
+        In OIDC mode, validates the Bearer token from Authorization header via JWKS.
+
+        Response format (API-compatible with auth service):
+        - Success: {"success": true, "message": "Action handled successfully"}
+        - Anonymous: {"success": true, "message": "anonymous"}
+        """
+        self.logger.debug("Start OIDC who-am-i request.")
+
+        user_id, _ = self.get_user_id_from_headers(request.headers, request.cookies)
+        if user_id and user_id > 0:
+            self.logger.debug(f"User authenticated: user_id={user_id}")
+            return {
+                "success": True,
+                "message": "Action handled successfully",
+                "user_id": user_id,
+            }, None
+
+        self.logger.debug("No valid session found, returning anonymous.")
+        return {"success": True, "message": "anonymous"}, None
+
+    @route("oidc-backchannel-logout", prefix="auth", method="POST", json=False)
+    def oidc_backchannel_logout(self, request: Request) -> RouteResponse:
+        """
+        Handle OIDC backchannel logout from Keycloak.
+
+        This endpoint receives logout tokens from Keycloak when a user's session
+        is terminated (e.g., via admin console or logout from another client).
+        The session ID is extracted and stored in both the local cache and
+        Redis for Go services to pick up.
+
+        Request:
+        - Content-Type: application/x-www-form-urlencoded
+        - Body: logout_token=<JWT>
+
+        Response:
+        - 200 OK with {"status": "ok"} on success
+        - 400 Bad Request if logout_token is missing or OIDC not configured
+        """
+        # Get logout_token from form data
+        logout_token = request.form.get("logout_token")
+        if not logout_token:
+            raise View400Exception("Missing logout_token")
+
+        validator = get_oidc_validator()
+        if not validator:
+            raise View400Exception("OIDC not configured")
+
+        # Validate the logout token and extract session ID
+        payload = validator.validate_logout_token(logout_token)
+        session_id = payload["sid"]
+
+        # 1. Invalidate in Redis (used by Python workers for session checks)
+        invalidate_session(session_id)
+
+        # 2. Publish to Redis logout stream (for Go services)
+        from .base_view import _get_redis
+
+        r = _get_redis()
+        r.xadd("logout", {"sessionId": session_id})
+
+        self.logger.info(f"Backchannel logout: session {session_id} invalidated")
+        return {"status": "ok"}, None
 
     def check_internal_auth_password(self, request: Request) -> None:
         request_password = request.headers.get(INTERNAL_AUTHORIZATION_HEADER)
